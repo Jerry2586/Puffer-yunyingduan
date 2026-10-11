@@ -1,0 +1,41 @@
+name: Operations CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operations-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HETUN_UNI_DEPS: ${{ runner.temp }}/hetun-ops-dependencies/node_modules
+      HETUN_OPERATIONS_BUILD_ROOT: ${{ runner.temp }}/hetun-ops-build
+      HETUN_OPERATIONS_BUILD_INFO: ${{ runner.temp }}/hetun-ops-build/latest-build.json
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies outside source
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/hetun-ops-dependencies"
+          cp package.json package-lock.json "$RUNNER_TEMP/hetun-ops-dependencies/"
+          npm ci --prefix "$RUNNER_TEMP/hetun-ops-dependencies" --no-audit --no-fund
+      - name: Type check and build operations bundle
+        run: node deploy/operations/build.mjs
+      - name: Verify installation, CMS and published runtime
+        run: node --test deploy/operations/integration.test.mjs

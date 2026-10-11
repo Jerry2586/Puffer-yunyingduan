@@ -1,0 +1,58 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.DS_Store
+dist
+*.local
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# Local tools, credentials and generated app artifacts
+.local/
+unpackage/
+artifacts/
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+
+# Machine-specific project registration (no credentials)
+.dev-environment.json
+
+# External runtime state, verification and packaged deliveries
+state/
+.runtime/
+builds/
+release/
+reports/
+verification/
+admin-credentials.json
+theme-state.json
+operations-state.json
+cloud-license.json
+operations.env
+*.pem
+*.key
+*.pfx
+*.tar.gz
+*.zip
+*.apk
+*.aab
+*.ipa
+*.exe
+*.msi

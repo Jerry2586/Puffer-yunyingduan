@@ -1,0 +1,4 @@
+import type {Vod} from './types';
+const rows=[['tide','潮汐之间','电影','2026','剧情 · 治愈','9.1'],['forest','山野来信','纪录片','2025','自然 · 生活','8.9'],['orbit','第七颗星','电影','2026','科幻 · 冒险','9.0'],['city','凌晨四点','电视剧','2025','悬疑 · 都市','8.6'],['summer','夏日停靠','电影','2026','青春 · 生活','8.8'],['snow','漫长的归途','电影','2025','剧情 · 冒险','8.7']];
+export const demoVods:Vod[]=rows.map(([id,title,category,year,note,score]) => ({id:'demo-'+id,title,poster:'/static/posters/'+id+'.svg',category,categoryId:({'电影':'1','电视剧':'2','综艺':'3','动漫':'4','纪录片':'5'} as Record<string,string>)[category]||category,year,note,score,area:'主题示例',description:'这是河豚主题设计的示例内容，用来预览颜色与排版，不是真实片库。配置苹果 CMS 后，页面将展示实际影片和播放信息。',actors:'',director:'',sources:[]}));
+export const demoCategories=[{id:'1',name:'电影'},{id:'2',name:'电视剧'},{id:'3',name:'综艺'},{id:'4',name:'动漫'},{id:'5',name:'纪录片'}];

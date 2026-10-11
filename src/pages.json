@@ -1,0 +1,41 @@
+{
+  "pages": [
+    // #ifndef H5
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "河豚"
+      }
+    },
+    // #endif
+    {
+      "path": "pages/studio/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "河豚影视中心"
+      }
+    },
+    {
+      "path": "pages/demo/index",
+      "style": {"navigationStyle": "custom", "navigationBarTitleText": "河豚四端演示"}
+    },
+    {
+      "path": "pages/tv/index",
+      "style": {"navigationStyle": "custom", "navigationBarTitleText": "河豚 TV"}
+    },
+    {
+      "path": "pages/detail/index",
+      "style": {
+        "navigationStyle": "custom",
+        "navigationBarTitleText": "影片详情"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "河豚",
+    "navigationBarBackgroundColor": "#0b1115",
+    "backgroundColor": "#0b1115"
+  }
+}
