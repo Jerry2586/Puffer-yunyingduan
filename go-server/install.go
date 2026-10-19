@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -82,6 +83,42 @@ func probeMySQL(ctx context.Context, dsn string) error {
 	}
 	defer db.Close()
 	return db.PingContext(ctx)
+}
+
+// Return actionable categories without exposing driver messages, DSNs or credentials.
+func installationDatabaseError(stage string, err error) M {
+	code, message := "database_error", "数据库操作失败，请检查数据库服务与当前账号权限"
+	var my *mysql.MySQLError
+	var dns *net.DNSError
+	var network net.Error
+	switch {
+	case errors.As(err, &my):
+		switch my.Number {
+		case 1045, 1698:
+			code, message = "authentication_failed", "数据库认证失败：请核对数据库用户名和密码（不是宝塔登录密码），以及该账号是否允许本机 TCP 登录"
+		case 1049:
+			code, message = "database_not_found", "数据库不存在：请在宝塔确认完整数据库名，复制实际名称后重试"
+		case 1044, 1142, 1143, 1227:
+			code, message = "permission_denied", "数据库权限不足：请检查当前账号对指定库的访问、建表、读取和写入权限"
+		case 1129, 1130:
+			code, message = "host_denied", "数据库拒绝此来源连接：请检查当前账号的本机访问权限及 MySQL 主机限制"
+		case 1040, 1203, 1226:
+			code, message = "connection_limit", "数据库连接或资源额度已满，请检查当前数据库账号的连接占用与限额"
+		}
+	case errors.Is(err, context.DeadlineExceeded):
+		code, message = "connection_timeout", "数据库连接或操作超时：请检查地址、端口、服务监听及网络连通性"
+	case errors.As(err, &dns):
+		code, message = "host_not_found", "数据库地址无法解析：请检查数据库主机名"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		code, message = "connection_refused", "数据库端口拒绝连接：请检查数据库服务是否运行，以及地址、端口和监听设置"
+	case errors.As(err, &network) && network.Timeout():
+		code, message = "connection_timeout", "数据库连接或操作超时：请检查地址、端口、服务监听及网络连通性"
+	}
+	result := M{"error": message, "code": code, "stage": stage}
+	if my != nil {
+		result["mysqlCode"] = my.Number
+	}
+	return result
 }
 func (i *installer) Close() error {
 	i.mu.Lock()
@@ -173,7 +210,7 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if strings.HasSuffix(r.URL.Path, "/test") {
 		if e = i.probe(ctx, c.MySQLDSN); e != nil {
-			jsonResponse(w, 400, M{"error": "数据库连接失败，请检查地址、账号、密码、库名及访问权限"})
+			jsonResponse(w, 400, installationDatabaseError("connect", e))
 			return
 		}
 		jsonResponse(w, 200, M{"ok": true, "message": "数据库连接成功；完成安装时将检查建表和写入权限"})
@@ -190,7 +227,7 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s, e := i.connect(c.MySQLDSN)
 	if e != nil {
-		jsonResponse(w, 400, M{"error": "数据库初始化失败，请检查连接及建表权限"})
+		jsonResponse(w, 400, installationDatabaseError("initialize", e))
 		return
 	}
 	keep := false
@@ -205,11 +242,11 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		existing.Credential = cred
 		existing.Setup = M{"completedAt": now(), "installationID": i.installationID}
 		if e = s.Save(ctx, existing, 0); e != nil {
-			jsonResponse(w, 500, M{"error": "数据库写入失败，请检查写入权限后重试"})
+			jsonResponse(w, 500, installationDatabaseError("write", e))
 			return
 		}
 	} else if e != nil {
-		jsonResponse(w, 500, M{"error": "无法读取数据库状态"})
+		jsonResponse(w, 500, installationDatabaseError("read", e))
 		return
 	} else if str(existing.Setup["installationID"]) != i.installationID || existing.Credential.Username != v.Admin || !matches(existing.Credential, v.AdminPassword) {
 		jsonResponse(w, 409, M{"error": "此数据库已有后台数据，请使用独立空数据库；原数据未覆盖"})

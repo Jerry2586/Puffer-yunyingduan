@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	mysql "github.com/go-sql-driver/mysql"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -198,6 +201,27 @@ func TestInstallerMySQL(t *testing.T) {
 		}
 	})
 	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: host, Port: port, Database: db.DBName, Username: db.User, Password: db.Passwd, Admin: "owner", AdminPassword: "StrongLocal12345"}
+	// Validate real server error classification before creating any installation state.
+	for _, tc := range []struct {
+		name, code string
+		mutate     func(*installInput)
+	}{
+		{"missing-database", "database_not_found", func(x *installInput) { x.Database = "hetun_missing_" + randomToken()[:16] }},
+		{"invalid-login", "authentication_failed", func(x *installInput) { x.Username = "hetun_missing_" + randomToken()[:12]; x.Password = randomToken() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := v
+			tc.mutate(&bad)
+			w := installRequest(i, "POST", i.route+"/test", bad, v.PublicOrigin)
+			var result struct{ Code string }
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 400 || result.Code != tc.code {
+				t.Fatalf("real MySQL diagnostic: %d %s", w.Code, w.Body)
+			}
+		})
+	}
 	if w := installRequest(i, "POST", i.route+"/test", v, v.PublicOrigin); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
@@ -236,5 +260,59 @@ func TestInstallerMySQL(t *testing.T) {
 	defer cancel()
 	if e = probeMySQL(ctx, "bad:bad@tcp(127.0.0.1:1)/missing?timeout=1s"); e == nil {
 		t.Fatal("invalid DB accepted")
+	}
+}
+
+func TestInstallerDatabaseDiagnostics(t *testing.T) {
+	i, err := newInstaller(filepath.Join(t.TempDir(), "config.json"), "127.0.0.1:8787")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.Close()
+	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Admin: "owner", AdminPassword: "StrongLocal12345"}
+	tests := []struct {
+		name   string
+		err    error
+		code   string
+		number uint16
+	}{
+		{"auth", &mysql.MySQLError{Number: 1045, Message: "SECRET_PASSWORD"}, "authentication_failed", 1045},
+		{"missing", fmt.Errorf("wrapped: %w", &mysql.MySQLError{Number: 1049, Message: "SECRET_PASSWORD"}), "database_not_found", 1049},
+		{"access", &mysql.MySQLError{Number: 1044, Message: "SECRET_PASSWORD"}, "permission_denied", 1044},
+		{"table", &mysql.MySQLError{Number: 1142, Message: "SECRET_PASSWORD"}, "permission_denied", 1142},
+		{"host", &mysql.MySQLError{Number: 1130, Message: "SECRET_PASSWORD"}, "host_denied", 1130},
+		{"limit", &mysql.MySQLError{Number: 1040, Message: "SECRET_PASSWORD"}, "connection_limit", 1040},
+		{"timeout", fmt.Errorf("SECRET_PASSWORD: %w", context.DeadlineExceeded), "connection_timeout", 0},
+		{"dns", &net.DNSError{Err: "SECRET_PASSWORD", Name: "private-host", IsNotFound: true}, "host_not_found", 0},
+		{"refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, "connection_refused", 0},
+		{"unknown", errors.New("SECRET_PASSWORD"), "database_error", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			i.probe = func(context.Context, string) error { return tc.err }
+			i.connect = func(string) (store, error) { return nil, tc.err }
+			for _, action := range []string{"test", "complete"} {
+				w := installRequest(i, "POST", i.route+"/"+action, v, v.PublicOrigin)
+				var result struct {
+					Error     string
+					Code      string
+					Stage     string
+					MySQLCode uint16
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				stage := "connect"
+				if action == "complete" {
+					stage = "initialize"
+				}
+				if w.Code != 400 || result.Code != tc.code || result.MySQLCode != tc.number || result.Stage != stage || result.Error == "" {
+					t.Fatalf("unexpected diagnostic: %d %s", w.Code, w.Body)
+				}
+				if strings.Contains(w.Body.String(), "SECRET_PASSWORD") || strings.Contains(w.Body.String(), "private-host") {
+					t.Fatal("driver details leaked")
+				}
+			}
+		})
 	}
 }
