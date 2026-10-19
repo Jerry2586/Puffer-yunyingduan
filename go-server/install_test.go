@@ -101,6 +101,13 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	for _, route := range []string{"/install", i.route, i.route + "/complete"} {
+		w := httptest.NewRecorder()
+		restarted.ServeHTTP(w, httptest.NewRequest("GET", v.PublicOrigin+route, nil))
+		if w.Code != 404 {
+			t.Fatal("restarted installer route must stay closed", route, w.Code)
+		}
+	}
 	r := httptest.NewRequest("POST", v.PublicOrigin+"/api/admin/login", strings.NewReader(`{"username":"owner","password":"StrongLocal12345"}`))
 	r.Header.Set("Origin", v.PublicOrigin)
 	r.Header.Set("X-Hetun-Client", "studio")

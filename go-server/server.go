@@ -228,6 +228,9 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 	route := r.URL.Path
+	if route == "/install" || strings.HasPrefix(route, "/install/") {
+		return problem(404, "安装入口已关闭")
+	}
 	origin := r.Header.Get("Origin")
 	admin := strings.HasPrefix(route, "/api/admin/")
 	allowed := origin == a.config.PublicOrigin
