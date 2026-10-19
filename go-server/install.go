@@ -74,6 +74,7 @@ func newInstaller(configPath, listen string) (*installer, error) {
 	digest := sha256.Sum256([]byte(token))
 	return &installer{configPath: absolute, dataDir: dir, listen: listen, route: "/install/" + token, installationID: hex.EncodeToString(digest[:]), connect: func(dsn string) (store, error) { return openMySQL(dsn) }, probe: probeMySQL}, nil
 }
+func (i *installer) adminPath() string { return "/" + strings.TrimPrefix(i.route, "/install/")[:16] }
 func probeMySQL(ctx context.Context, dsn string) error {
 	db, e := sql.Open("mysql", dsn)
 	if e != nil {
@@ -104,7 +105,7 @@ func (i *installer) configuration(v installInput) (config, error) {
 	db.Timeout = 5 * time.Second
 	db.ReadTimeout = 10 * time.Second
 	db.WriteTimeout = 10 * time.Second
-	return validateConfig(config{Listen: i.listen, PublicOrigin: strings.TrimSpace(v.PublicOrigin), DataDir: i.dataDir, Storage: "mysql", MySQLDSN: db.FormatDSN(), ClientOrigins: []string{}})
+	return validateConfig(config{AdminPath: i.adminPath(), Listen: i.listen, PublicOrigin: strings.TrimSpace(v.PublicOrigin), DataDir: i.dataDir, Storage: "mysql", MySQLDSN: db.FormatDSN(), ClientOrigins: []string{}})
 }
 func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	i.mu.RLock()
@@ -126,15 +127,19 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, M{"status": "installation-required", "version": buildVersion, "runtime": "Go"})
 		return
 	}
-	if r.URL.Path != i.route && r.URL.Path != i.route+"/test" && r.URL.Path != i.route+"/complete" {
+	if r.Method == "GET" && r.URL.Path == "/" {
+		http.Redirect(w, r, i.adminPath(), http.StatusTemporaryRedirect)
+		return
+	}
+	if r.URL.Path != i.adminPath() && r.URL.Path != i.route && r.URL.Path != i.route+"/test" && r.URL.Path != i.route+"/complete" {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method == "GET" && r.URL.Path == i.route {
+	if r.Method == "GET" && (r.URL.Path == i.route || r.URL.Path == i.adminPath()) {
 		nonce := randomToken()
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, strings.ReplaceAll(installHTML, "NONCE_PLACEHOLDER", nonce))
+		io.WriteString(w, strings.ReplaceAll(strings.ReplaceAll(installHTML, "NONCE_PLACEHOLDER", nonce), "INSTALL_ENDPOINT_PLACEHOLDER", i.route))
 		return
 	}
 	origin, e := url.Parse(r.Header.Get("Origin"))
@@ -221,7 +226,8 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keep = true
+	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	i.active = a
 	_ = os.Remove(filepath.Join(i.dataDir, "install-token.txt"))
-	jsonResponse(w, 200, M{"ok": true, "redirect": "/#/pages/studio/index"})
+	jsonResponse(w, 200, M{"ok": true, "redirect": i.adminPath() + "#/pages/studio/index"})
 }

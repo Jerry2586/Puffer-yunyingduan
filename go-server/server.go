@@ -35,6 +35,7 @@ func problem(status int, message string) error     { return &apiError{Status: st
 func coded(status int, message, code string) error { return &apiError{status, message, code} }
 
 type config struct {
+	AdminPath       string   `json:"adminPath,omitempty"`
 	Listen          string   `json:"listen"`
 	PublicOrigin    string   `json:"publicOrigin"`
 	DataDir         string   `json:"dataDir"`
@@ -525,7 +526,26 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 	if strings.Contains(route, "..") || strings.Contains(route, "\\") {
 		return problem(400, "路径无效")
 	}
-	if path.Ext(route) == "" && route != "/" {
+	if a.config.AdminPath != "" {
+		if route == a.config.AdminPath+"/" {
+			http.Redirect(w, r, a.config.AdminPath, http.StatusTemporaryRedirect)
+			return nil
+		}
+		if route == a.config.AdminPath {
+			r2 := r.Clone(r.Context())
+			u := *r.URL
+			u.Path = "/"
+			r2.URL = &u
+			w.Header().Set("Cache-Control", "no-store")
+			a.web.ServeHTTP(w, r2)
+			return nil
+		}
+		// Public static resources must not expose another entry to the SPA.
+		if path.Ext(route) == "" || strings.EqualFold(path.Ext(route), ".html") {
+			return problem(404, "没有找到这个页面")
+		}
+	}
+	if a.config.AdminPath == "" && path.Ext(route) == "" && route != "/" {
 		r2 := r.Clone(r.Context())
 		u := *r.URL
 		u.Path = "/"

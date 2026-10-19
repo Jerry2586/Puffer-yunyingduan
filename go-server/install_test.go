@@ -48,10 +48,16 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	if e != nil || parsed.Passwd != v.Password || parsed.DBName != v.Database {
 		t.Fatal("database credentials changed", e)
 	}
-	for _, route := range []string{"/", "/install/wrong", "/config.json", "/data/install-token.txt", "/api/admin/state"} {
+	for _, route := range []string{"/install/wrong", "/config.json", "/data/install-token.txt", "/api/admin/state"} {
 		if w := installRequest(i, "GET", route, nil, ""); w.Code != 404 {
 			t.Fatal(route, w.Code)
 		}
+	}
+	if w := installRequest(i, "GET", "/", nil, ""); w.Code != 307 || w.Header().Get("Location") != i.adminPath() {
+		t.Fatal("root must lead to installation", w.Code)
+	}
+	if w := installRequest(i, "GET", i.adminPath(), nil, ""); w.Code != 200 || !strings.Contains(w.Body.String(), i.route+"/complete") && !strings.Contains(w.Body.String(), i.route+"/") {
+		t.Fatal("random entry must serve working installer", w.Code)
 	}
 	w := installRequest(i, "GET", i.route, nil, "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "测试数据库连接") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "nonce-") {
@@ -80,7 +86,7 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	loaded, e := loadConfig(file)
-	if e != nil || loaded.Storage != "mysql" || loaded.PublicOrigin != v.PublicOrigin {
+	if e != nil || loaded.Storage != "mysql" || loaded.PublicOrigin != v.PublicOrigin || loaded.AdminPath != i.adminPath() {
 		t.Fatal(e)
 	}
 	state, e := storage.Load(context.Background())
@@ -101,12 +107,17 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, route := range []string{"/install", i.route, i.route + "/complete"} {
+	for _, route := range []string{"/", "/index.html", "/anything", "/install", i.route, i.route + "/complete"} {
 		w := httptest.NewRecorder()
 		restarted.ServeHTTP(w, httptest.NewRequest("GET", v.PublicOrigin+route, nil))
 		if w.Code != 404 {
 			t.Fatal("restarted installer route must stay closed", route, w.Code)
 		}
+	}
+	wEntry := httptest.NewRecorder()
+	restarted.ServeHTTP(wEntry, httptest.NewRequest("GET", v.PublicOrigin+loaded.AdminPath, nil))
+	if wEntry.Code != 200 {
+		t.Fatal("saved admin entry unavailable", wEntry.Code)
 	}
 	r := httptest.NewRequest("POST", v.PublicOrigin+"/api/admin/login", strings.NewReader(`{"username":"owner","password":"StrongLocal12345"}`))
 	r.Header.Set("Origin", v.PublicOrigin)

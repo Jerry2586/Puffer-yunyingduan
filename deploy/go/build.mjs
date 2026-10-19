@@ -30,12 +30,8 @@ const info={product:'hetun-operations',version,batch,compiler,frontend,staging,b
 for(const [goos,goarch] of [['linux','amd64'],['linux','arm64'],['windows','amd64']]){
  const target=goos+'-'+goarch,bundle=path.join(batch,'hetun-operations-'+target),name='hetun-operations'+(goos==='windows'?'.exe':'');await fs.mkdir(bundle,{recursive:true});
  const binary=path.join(bundle,name);await run('go',['build','-trimpath','-ldflags','-s -w -X main.buildVersion='+version,'-o',binary,'.'],staging,{...process.env,CGO_ENABLED:'0',GOOS:goos,GOARCH:goarch});await fs.chmod(binary,0o755);
- for(const file of ['config.example.json','README.md','hetun-operations.service','nginx-location.conf'])await fs.copyFile(path.join(source,'deploy/go',file),path.join(bundle,file));
- await fs.mkdir(path.join(bundle,'cms-adapter'));await fs.copyFile(path.join(source,'server/maccms-extension/Hetun.php'),path.join(bundle,'cms-adapter/Hetun.php'));
- const manifest={product:info.product,version,target,runtime:'Go standalone, CGO disabled',builtAt:info.builtAt,files:{}};
- async function hashes(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await hashes(file);else manifest.files[path.relative(bundle,file).replaceAll('\\','/')]=await hash(file);}}await hashes(bundle);await fs.writeFile(path.join(bundle,'release-manifest.json'),JSON.stringify(manifest,null,2));
- const release=path.join(external,'release',version);await fs.mkdir(release,{recursive:true});const archive=path.join(release,'Hetun-Operations-'+version+'-'+target+'.tar.gz');await run('tar',['-czf',archive,'-C',bundle,'.'],batch);
- info.targets.push({target,bundle,binary,archive,bytes:(await fs.stat(archive)).size,sha256:await hash(archive)});
+ const release=path.join(external,'release',version);await fs.mkdir(release,{recursive:true});const archive=path.join(release,'Hetun-Operations-'+version+'-'+target+'.tar.gz');await run('tar',['-czf',archive,'-C',bundle,name],batch);
+ info.targets.push({target,bundle,binary,archive,bytes:(await fs.stat(archive)).size,sha256:await hash(archive),binarySha256:await hash(binary)});
 }
 const releaseDir=path.join(external,'release',version);await fs.writeFile(path.join(releaseDir,'SHA256SUMS.txt'),info.targets.map(t=>t.sha256+'  '+path.basename(t.archive)).join('\n')+'\n');
 await fs.writeFile(path.join(external,'latest-build.json'),JSON.stringify(info,null,2));console.log(JSON.stringify(info,null,2));

@@ -14,12 +14,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 )
 
-var buildVersion = "0.3.0"
+var buildVersion = "0.3.1"
 var errNoState = sql.ErrNoRows
 
 func loadConfig(name string) (config, error) {
@@ -43,8 +44,11 @@ func validateConfig(c config) (config, error) {
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
 		return c, fmt.Errorf("publicOrigin 必须是纯域名来源，不含路径或尾斜线")
 	}
-	if u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "127.0.0.1") {
-		return c, fmt.Errorf("正式访问域名必须使用 HTTPS，本机测试可用 http://127.0.0.1")
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return c, fmt.Errorf("访问地址必须使用 HTTP 或 HTTPS")
+	}
+	if c.AdminPath != "" && !regexp.MustCompile("^/[a-f0-9]{16}$").MatchString(c.AdminPath) {
+		return c, fmt.Errorf("后台入口格式不正确")
 	}
 	if !filepath.IsAbs(c.DataDir) {
 		return c, fmt.Errorf("dataDir 必须是可写的绝对路径")
@@ -73,7 +77,7 @@ func run() error {
 		return err
 	}
 	configPath := flag.String("config", filepath.Join(filepath.Dir(exe), "config.json"), "配置文件路径（默认程序同目录）")
-	listen := flag.String("listen", "127.0.0.1:8787", "首次安装监听地址")
+	listen := flag.String("listen", "0.0.0.0:8787", "首次安装监听地址")
 	version := flag.Bool("version", false, "打印版本")
 	check := flag.Bool("check-config", false, "检查配置")
 	backup := flag.String("backup", "", "将业务数据导出到指定绝对文件")
@@ -91,7 +95,7 @@ func run() error {
 				return err
 			}
 			defer installer.Close()
-			log.Printf("首次安装：监听 %s；请在宝塔绑定域名和HTTPS，访问 https://你的域名%s（临时安装入口，安装后关闭）", *listen, installer.route)
+			logStartup(*listen, "", installer.adminPath(), true)
 			return serve(*listen, installer)
 		}
 		return e
@@ -169,8 +173,36 @@ func run() error {
 		fmt.Println("业务备份完成；素材目录请单独备份")
 		return nil
 	}
-	log.Printf("河豚运营端 %s 监听 %s", buildVersion, c.Listen)
+	if c.AdminPath == "" {
+		c.AdminPath = "/" + randomToken()[:16]
+		b, err := json.MarshalIndent(c, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err = atomicFile(*configPath, b); err != nil {
+			return fmt.Errorf("保存后台入口失败: %w", err)
+		}
+		a.config = c
+	}
+	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	return serve(c.Listen, a)
+}
+func logStartup(listen, origin, adminPath string, installing bool) {
+	_, port, _ := net.SplitHostPort(listen)
+	log.Print("========================================")
+	log.Printf("河豚运营中心 %s", buildVersion)
+	log.Printf("端口：%s", port)
+	log.Printf("后台访问路径：%s", adminPath)
+	if origin == "" {
+		log.Printf("后台地址示例：http://服务器IP:%s%s", port, adminPath)
+		log.Printf("绑定域名后访问：https://你的域名%s", adminPath)
+	} else {
+		log.Printf("后台地址：%s%s", origin, adminPath)
+	}
+	if installing {
+		log.Print("首次启动：打开上述后台地址，填写数据库并创建管理员")
+	}
+	log.Print("========================================")
 }
 func serve(listen string, handler http.Handler) error {
 	server := &http.Server{Addr: listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
@@ -183,7 +215,12 @@ func serve(listen string, handler http.Handler) error {
 		defer cancel()
 		_ = server.Shutdown(ctx)
 	}()
-	e := server.ListenAndServe()
+	listener, e := net.Listen("tcp", listen)
+	if e != nil {
+		return e
+	}
+	log.Print("启动成功")
+	e = server.Serve(listener)
 	if errors.Is(e, http.ErrServerClosed) {
 		return nil
 	}

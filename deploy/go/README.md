@@ -1,40 +1,39 @@
-# 河豚运营中心 0.3.0 安装说明
+# 河豚运营中心 0.3.1 安装说明
 
-正式服务为 Go 独立程序，内嵌后台网页。服务器不需要安装 Node.js、npm 或 Go 编译器；需要 MySQL 8.0 和宝塔 Nginx。商业授权、激活码及云 Key 校验已移除，管理员登录保留。
+解压后只有一个 hetun-operations 程序。网页、安装向导和接口都已内置，服务器无需安装 Node.js、Go 编译器，也不需要手写配置文件。
 
-## 宝塔首次安装（推荐）
+## 宝塔安装
 
-1. 普通 Intel/AMD 64 位 Linux 服务器下载 linux-amd64 包；ARM 服务器使用 linux-arm64 包。请核对 SHA256SUMS.txt。
-2. 宝塔文件管理中创建空目录，例如 /www/server/hetun-operations。上传对应压缩包并解压，程序直接位于该目录中。不要把程序目录设为公开静态网站根目录。
-3. 宝塔「数据库」创建一个独立的空 MySQL 数据库，记下库名、用户名、密码。无需导入 SQL，不要共用已有 CMS 数据库。
-4. 给 hetun-operations 文件执行权限；确保运行账号可以读写程序目录。宝塔使用 Go 项目或进程管理器运行该可执行文件，工作目录设为程序所在目录，开启守护和开机启动。启动命令为 ./hetun-operations；无需编译。默认只监听 127.0.0.1:8787。
-5. 宝塔创建独立域名网站并配置 HTTPS，反向代理到 http://127.0.0.1:8787，保留 Host 请求头。可使用包内 nginx-location.conf，替换冲突的 location /，保留证书配置。此项目的所有请求都交给 Go 服务，不公开程序目录中的文件。
-6. 在项目启动日志中找到 /install/ 后面的临时安装路径，打开「https://你的域名/install/日志中的随机字符串」。也可以从程序目录 data/install-token.txt 读取字符串。该路径是首次安装入口，无需购买或输入授权码；不要公开分享。
-7. 填写后台 HTTPS 地址、数据库连接和自选管理员账号密码。先测试连接，再完成安装。程序会建表、保存 config.json、创建 data 目录并关闭安装入口，随后进入后台登录页。安装不要求先连接 CMS。
-8. 用刚创建的管理员登录，在后台连接设置中接入自己的苹果 CMS，然后保存并发布运营配置。
+1. 创建一个空文件夹，上传并解压 Linux 安装包。普通 x86 服务器选 linux-amd64，ARM64 服务器选 linux-arm64。
+2. 宝塔创建一个独立空 MySQL 数据库，记下库名、用户名、密码，无需导入 SQL。
+3. 在宝塔「Go 项目 → 添加项目」选择解压的 hetun-operations 文件，项目名称填 hetun，项目端口填 8787，执行命令使用默认程序命令，无需参数；环境变量留空，运行用户 www，勾选开机自启。确保文件可执行、www 对程序所在目录有读写权限。
+4. 启动后在项目日志查看「后台访问路径」和「后台地址示例」。打开 http://服务器IP:8787/日志中的随机路径。通过 IP 直连时需放行服务器防火墙和安全组的 8787 端口；使用域名则在宝塔项目中绑定域名及 HTTPS。
+5. 网页自动填写网站来源地址，填写数据库和自选管理员账号密码，测试连接后完成安装，再登录后台。
 
-若端口占用，首次启动使用 ./hetun-operations --listen 127.0.0.1:8788，并把反向代理端口改为 8788；安装完成后端口保存到 config.json。配置文件默认位于可执行文件旁，路径有空格时由进程管理器正确引用。也可通过 --config /绝对路径/config.json 指定配置路径，其父目录必须可写。程序不会用安装向导覆盖已存在的配置或已初始化的数据库。
+首次启动生成随机后台路径，例如 /8f2b6d1a9c4e7035。安装和登录使用同一地址，重启、升级后保持不变。安装完后，根路径和 /index.html 不开放后台，临时安装接口关闭；管理员登录验证仍然保留。客户端仍然使用固定 /api/ 接口，无需拼接后台随机路径。
 
-连接成功仅代表账号可连接数据库；完成安装还需要建表和写入权限。保存配置失败时修复目录权限，使用相同管理员信息重试。安装入口在未完成时重启保持有效，完成后失效。
+运行后程序会在自身目录自动生成 config.json 和 data，这是保存数据库连接、随机入口、素材及日志所需的运行文件。安装包本身只有一个程序。不要把程序目录配置为可公开下载文件的静态网站。
+
+默认监听 0.0.0.0:8787。端口占用时启动命令增加 --listen 0.0.0.0:8788，同时把宝塔项目端口改成 8788；首次安装后监听地址保存到配置。默认配置位置是程序旁，不依赖宝塔启动时的工作目录。随机入口忘记后查看启动日志即可。
+
+连接成功代表数据库可连接；完成安装还需要建表和写入权限。保存配置失败时修复目录权限，使用同一管理员信息重试；已初始化的其他数据库不会被覆盖。
 
 ## CMS 与客户端
 
-CMS 采集接口用于分类和影片列表。会员、订单及播放权限需要兼容接口及包内 cms-adapter/Hetun.php。先备份自己的 CMS，再将文件安装到 application/index/controller/Hetun.php；已有同名文件时先比对。实际验证 index.php/hetun/token 和 index.php/hetun/play，以及会员、收费影片、支付回调。不同 CMS 魔改版本需单独验收。
+登录后台后再接入自己的苹果 CMS。采集分类和影片列表使用 CMS 采集接口。会员、订单及播放权限需要 CMS 兼容接口；适配器源文件位于仓库 server/maccms-extension/Hetun.php，需要时单独下载并安装到自己的 CMS 的 application/index/controller/Hetun.php。该文件不放进运营端单程序安装包。已有同名文件时先备份、比对；不同 CMS 修改版本需实际验收会员、付费影片及支付回调。
 
-客户端固定接口：GET /api/bootstrap?platform=mobile&os=android&version=1.0.0；platform 支持 mobile/tablet/tv/web。运营协议 hetun-operations-v1，主题协议 hetun-runtime-v1。客户端必须实现协议，由本地打包器写入运营地址。运营端不进行云打包、不替换已打包的品牌、配色和布局。
+客户端固定接口：GET /api/bootstrap?platform=mobile&os=android&version=1.0.0；platform 支持 mobile/tablet/tv/web。运营协议 hetun-operations-v1，主题协议 hetun-runtime-v1。基础客户端必须实现协议，由本地打包器写入运营地址。运营端管理运营内容，不承担云打包或远程修改已打包主题。
 
-## 升级与备份
+## 升级
 
-停止当前进程，备份 MySQL、config.json 和整个 data 目录，保留旧程序。解压新版到临时目录，只替换可执行文件，保留原 config.json、data、数据库及运行账号权限，再启动服务。不要删除配置后对旧库重新安装。
+停止原程序，备份 MySQL、config.json 和完整 data 目录；只替换可执行文件后启动。升级保留配置、数据库和素材。0.3.0 旧配置首次升级会自动生成并保存随机后台路径，请查看新启动日志。
 
-业务状态可通过 ./hetun-operations --backup /绝对路径/backup.json 导出，素材仍需单独备份。仅向尚未初始化的空数据库使用 --import-state /绝对路径/backup.json；程序拒绝覆盖现有状态。旧 Node 版本先用源码中的 deploy/go/migrate-node-state.mjs 迁移状态，再复制素材。迁移前保留旧服务和完整备份。
+不要删除配置后对旧库重新安装。失败回退需恢复匹配的旧程序、数据库和数据目录。配置含数据库凭据，备份应限制访问权限。
 
-失败回退需停止新程序，恢复匹配的旧程序、数据库及数据目录。后台发布历史回退只恢复运营配置，不代替系统备份。配置含数据库凭据，备份含密码摘要，应限制文件权限。
+## 开发与其他运行方式
 
-## 其他运行方式
+高级配置、systemd 和 Nginx 示例保留在源码 deploy/go/ 目录，不放入用户安装包。Windows 版本用于本机运行；正式存储使用 MySQL，file 模式仍仅限本机测试。
 
-不使用宝塔进程管理时，可用包内 systemd 模板。该模板为预配置部署：先按 config.example.json 创建 /etc/hetun-operations/config.json、hetun-ops 账号和可写的 /var/lib/hetun-operations，再按模板安装到 /etc/systemd/system/，执行 systemctl daemon-reload 和 systemctl enable --now hetun-operations。不要同时使用两套进程管理启动同一实例。
+业务备份命令为 ./hetun-operations --backup /绝对路径/backup.json，素材单独备份。--import-state 仅允许导入尚未初始化的空库。旧 Node 状态可先用 deploy/go/migrate-node-state.mjs 转换。
 
-Windows 包适合本地查看；可连接测试 MySQL 走同样安装流程，或按 config.example.json 手动设置 storage=file、删除 mysqlDSN，listen/publicOrigin 使用同一 127.0.0.1 端口，dataDir 使用绝对路径。file 模式仅用于本机，正式部署使用 MySQL。
-
-正式发布包含 Go 单元测试、独立成品归档验证和 Linux 隔离 MySQL 安装测试；这不代替你的宝塔服务器、生产 CMS、支付和安卓真机验收。iOS 内购与二进制二次打包仍需独立实现。
+发布检查包括归档严格只有一个程序、实际进程启动、随机入口持久化、客户端接口及隔离 MySQL 安装测试。宝塔实站、生产 CMS、支付和客户端真机仍需实际环境验收。
