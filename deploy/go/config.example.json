@@ -1,0 +1,10 @@
+{
+  "listen": "127.0.0.1:8787",
+  "publicOrigin": "https://ops.example.com",
+  "dataDir": "/var/lib/hetun-operations",
+  "storage": "mysql",
+  "mysqlDSN": "hetun_ops:CHANGE_ME@tcp(127.0.0.1:3306)/hetun_ops?charset=utf8mb4&timeout=10s&readTimeout=10s&writeTimeout=10s",
+  "allowPrivateCMS": false,
+  "clientOrigins": [],
+  "cmsBase": ""
+}

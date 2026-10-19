@@ -1,0 +1,41 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {spawn} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const source=path.resolve(import.meta.dirname,'../..');
+const tools=process.env.HETUN_TOOLS_ROOT||path.join(process.env.LOCALAPPDATA||os.homedir(),'Programs/UniAppTools');
+const external=path.resolve(process.env.HETUN_OPERATIONS_BUILD_ROOT||path.join(tools,'projects/hetun-operations/go'));
+const relative=path.relative(source,external);if(!relative||(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep)))throw Error('构建、依赖与产物必须在源码目录之外');
+const deps=path.resolve(process.env.HETUN_UNI_DEPS||path.join(tools,'projects/hetun-app-c7cb6e60b06b/runtime/workspace/node_modules'));
+const dependencyRelative=path.relative(source,deps);if(!dependencyRelative||(!path.isAbsolute(dependencyRelative)&&dependencyRelative!=='..'&&!dependencyRelative.startsWith('..'+path.sep)))throw Error('依赖必须在源码目录外');
+const version=JSON.parse(await fs.readFile(path.join(source,'package.json'),'utf8')).version,batch=path.join(external,'builds',version+'-'+Date.now()),compiler=path.join(batch,'compiler'),frontend=path.join(batch,'frontend'),staging=path.join(batch,'go-server');
+const run=(exe,args,cwd,env=process.env)=>new Promise((resolve,reject)=>{const child=spawn(exe,args,{cwd,env,windowsHide:true,stdio:'inherit'});child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error('命令失败：'+exe+'，退出码 '+code)));});
+const hash=async file=>createHash('sha256').update(await fs.readFile(file)).digest('hex');
+await fs.mkdir(compiler,{recursive:true});
+for(const name of ['src','package.json','tsconfig.json','shims-uni.d.ts','index.html'])await fs.cp(path.join(source,name),path.join(compiler,name),{recursive:true});
+let html=await fs.readFile(path.join(compiler,'index.html'),'utf8');html=html.replace(/<script>[^]*?<\/script>/g,'<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />').replace(/<title>[^]*?<\/title>/,'<title>河豚运营中心</title>');await fs.writeFile(path.join(compiler,'index.html'),html);
+const manifestPath=path.join(compiler,'src/manifest.json');const appManifest=JSON.parse(await fs.readFile(manifestPath,'utf8'));appManifest.h5={...appManifest.h5,title:'河豚运营中心'};await fs.writeFile(manifestPath,JSON.stringify(appManifest,null,2));
+await fs.symlink(deps,path.join(compiler,'node_modules'),process.platform==='win32'?'junction':'dir');
+await fs.writeFile(path.join(compiler,'vite.config.ts'),"import {defineConfig} from 'vite';import uni from '@dcloudio/vite-plugin-uni';export default defineConfig({base:'/',plugins:[uni()]});\n");
+const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('VITE_'))delete env[key];Object.assign(env,{VITE_HETUN_OPERATIONS_CENTER:'1',VITE_HETUN_SERVICE_BASE:'',UNI_INPUT_DIR:path.join(compiler,'src'),UNI_OUTPUT_DIR:frontend,UNI_PLATFORM:'h5',NODE_ENV:'production'});
+await run(process.execPath,[path.join(deps,'vue-tsc/bin/vue-tsc.js'),'--noEmit'],compiler,env);
+await run(process.execPath,[path.join(deps,'@dcloudio/vite-plugin-uni/bin/uni.js'),'build','-p','h5'],compiler,env);
+await fs.cp(path.join(source,'go-server'),staging,{recursive:true});
+// Replace the source-only fallback in this fresh external staging directory.
+await fs.cp(frontend,path.join(staging,'web'),{recursive:true});
+await run('go',['test','./...','-count=1'],staging);
+await run('go',['vet','./...'],staging);
+const info={product:'hetun-operations',version,batch,compiler,frontend,staging,builtAt:new Date().toISOString(),targets:[]};
+for(const [goos,goarch] of [['linux','amd64'],['linux','arm64'],['windows','amd64']]){
+ const target=goos+'-'+goarch,bundle=path.join(batch,'hetun-operations-'+target),name='hetun-operations'+(goos==='windows'?'.exe':'');await fs.mkdir(bundle,{recursive:true});
+ const binary=path.join(bundle,name);await run('go',['build','-trimpath','-ldflags','-s -w -X main.buildVersion='+version,'-o',binary,'.'],staging,{...process.env,CGO_ENABLED:'0',GOOS:goos,GOARCH:goarch});await fs.chmod(binary,0o755);
+ for(const file of ['config.example.json','README.md','hetun-operations.service','nginx-location.conf'])await fs.copyFile(path.join(source,'deploy/go',file),path.join(bundle,file));
+ await fs.mkdir(path.join(bundle,'cms-adapter'));await fs.copyFile(path.join(source,'server/maccms-extension/Hetun.php'),path.join(bundle,'cms-adapter/Hetun.php'));
+ const manifest={product:info.product,version,target,runtime:'Go standalone, CGO disabled',builtAt:info.builtAt,files:{}};
+ async function hashes(dir){for(const entry of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())await hashes(file);else manifest.files[path.relative(bundle,file).replaceAll('\\','/')]=await hash(file);}}await hashes(bundle);await fs.writeFile(path.join(bundle,'release-manifest.json'),JSON.stringify(manifest,null,2));
+ const release=path.join(external,'release',version);await fs.mkdir(release,{recursive:true});const archive=path.join(release,'Hetun-Operations-'+version+'-'+target+'.tar.gz');await run('tar',['-czf',archive,'-C',bundle,'.'],batch);
+ info.targets.push({target,bundle,binary,archive,bytes:(await fs.stat(archive)).size,sha256:await hash(archive)});
+}
+const releaseDir=path.join(external,'release',version);await fs.writeFile(path.join(releaseDir,'SHA256SUMS.txt'),info.targets.map(t=>t.sha256+'  '+path.basename(t.archive)).join('\n')+'\n');
+await fs.writeFile(path.join(external,'latest-build.json'),JSON.stringify(info,null,2));console.log(JSON.stringify(info,null,2));

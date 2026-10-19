@@ -1,0 +1,23 @@
+[Unit]
+Description=Hetun Operations Go Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hetun-ops
+Group=hetun-ops
+WorkingDirectory=/opt/hetun-operations
+ExecStart=/opt/hetun-operations/hetun-operations --config /etc/hetun-operations/config.json
+Environment=TZ=Asia/Shanghai
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hetun-operations
+
+[Install]
+WantedBy=multi-user.target

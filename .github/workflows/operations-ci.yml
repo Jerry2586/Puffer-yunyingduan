@@ -17,6 +17,23 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: isolated-ci-password
+          MYSQL_DATABASE: hetun_test
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pisolated-ci-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      HETUN_TEST_MYSQL_DSN: root:isolated-ci-password@tcp(127.0.0.1:3306)/hetun_test?timeout=5s
+      HETUN_TEST_MYSQL_PASSWORD: isolated-ci-password
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -25,6 +42,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Use Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
       - name: Install locked dependencies outside source
         shell: bash
         run: |
@@ -40,3 +62,10 @@ jobs:
         env:
           HETUN_OPERATIONS_BUILD_INFO: ${{ runner.temp }}/hetun-ops-build/latest-build.json
         run: node --test deploy/operations/integration.test.mjs
+
+      - name: Save verified installation bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: hetun-operations-verified
+          path: ${{ runner.temp }}/hetun-ops-build/release/*/*
+          if-no-files-found: error

@@ -13,4 +13,4 @@ export interface Vod {id:string;title:string;poster:string;category:string;categ
 export interface Category {id:string;name:string}
 export interface Catalog {items:Vod[];page:number;pages:number;total:number}
 export interface Template {id:string;name:string;platform:Platform;renderer:'hetun-v2';draft:Theme;published:Theme|null;version:number;publishedVersion:number;installedAt:string}
-export interface StudioState {draft:Theme;published:Theme;version:number;publishedVersion:number;cmsBase:string;updatedAt:string;publishedAt:string;selectedTemplate:string;templates:Template[];activeTemplates:Partial<Record<Platform,string>>}
+export interface StudioState {history?:{version:number;publishedAt:string}[];contract?:string;draft:Theme;published:Theme;version:number;publishedVersion:number;cmsBase:string;updatedAt:string;publishedAt:string;selectedTemplate:string;templates:Template[];activeTemplates:Partial<Record<Platform,string>>}

@@ -1,6 +1,6 @@
 {
   "name": "hetun-app",
-  "version": "0.0.0",
+  "version": "0.3.0",
   "scripts": {
     "dev:h5": "uni --host 127.0.0.1 --port 5173",
     "dev:app": "uni -p app",
@@ -8,7 +8,9 @@
     "build:app": "uni build -p app",
     "type-check": "vue-tsc --noEmit",
     "check": "npm run type-check && npm run build:h5 && npm run build:app",
-    "serve:api": "node server/index.mjs"
+    "serve:api": "go -C go-server run . --config ../.runtime/config.json",
+    "build:operations": "node deploy/go/build.mjs",
+    "test:operations": "go -C go-server test ./..."
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020620260917001",
@@ -31,7 +33,7 @@
     "vue-tsc": "1.8.27"
   },
   "private": true,
-  "description": "河豚 uni-app 影视客户端与可视化主题工作台",
+  "description": "河豚运营中心：Go 独立服务与运营管理界面",
   "engines": {
     "node": ">=22.0.0 <23",
     "npm": ">=10 <11"

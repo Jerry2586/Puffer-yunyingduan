@@ -65,8 +65,14 @@ export function normalizeVod(vod,base) {
     })})).filter(s => s.episodes.length)};
 }
 export async function listCms(base, query, allowPrivate) {
+  if(!['latest','manual','score','hot'].includes(query.orderBy||'latest'))throw Error('影片排序不支持。');
+  if(query.orderBy==='hot')throw Error('当前CMS采集接口不提供全库热度排序。');
+  const ids=String(query.ids||'').split(',').map(v=>v.trim()).filter(Boolean);if(ids.length>60||ids.some(v=>!/^\d+$/.test(v)))throw Error('影片ID需为最多60个数字，以逗号分隔。');
   const raw=await requestCms(base,{ac:'detail',pg:query.page || 1,wd:query.keyword || '',t:query.category || '',ids:query.ids || ''},allowPrivate);
-  return {items:raw.list.map(vod=>normalizeVod(vod,base)),page:Number(raw.page)||1,pages:Number(raw.pagecount)||1,total:Number(raw.total)||raw.list.length};
+  let items=raw.list.map(vod=>normalizeVod(vod,base));
+  if(ids.length)items=ids.map(id=>items.find(v=>v.id===id)).filter(Boolean);
+  if(query.orderBy==='score')items.sort((a,b)=>(Number(b.score)||0)-(Number(a.score)||0));
+  return {items,page:Number(raw.page)||1,pages:Number(raw.pagecount)||1,total:Number(raw.total)||raw.list.length};
 }
 export async function categoriesCms(base, allowPrivate) {
   const raw=await requestCms(base,{ac:'list'},allowPrivate);

@@ -3,7 +3,6 @@ import {normalizeTheme} from '@/domain/normalize-theme';
 import type {Theme,StudioState,Catalog,Category,Platform} from '@/domain/types';
 export interface CmsCheck {id:'categories'|'catalog';label:string;ok:boolean;latencyMs:number;count?:number;total?:number|null;error?:string;}
 export interface CmsStatus {base:string;configured:boolean;ok:boolean;status:'unconfigured'|'ready'|'empty'|'error';checkedAt:string;latencyMs:number;checks:CmsCheck[];message:string;}
-export interface LicenseStatus {url:string;domain:string;keyConfigured:boolean;trustConfigured:boolean;products:Record<'film-center'|'theme',{valid:boolean;message?:string;expiresAt?:string;themes?:string[];licenseId?:string}>;}
 export interface SetupStatus {installed:boolean;completedAt:string;cmsConfigured:boolean;publicOrigin:string;localPreview:boolean;username:string;}
 export interface CmsDiscovery {candidates:{id:string;root:string;name:string;base:string;adapterInstalled:boolean;report:CmsStatus|null}[];warnings:string[];recommendedId:string;multiple:boolean;checkedAt:string;}
 const key='hetun-service-base';let clientPlatform:Platform='mobile';export function setClientPlatform(platform:Platform){clientPlatform=platform;}
@@ -20,9 +19,6 @@ export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?
 }
 export const api={
   exportTheme:(template:string)=>request<{name:string;data:string}>('/api/admin/export?template='+encodeURIComponent(template)),
-  license:()=>request<LicenseStatus>('/api/admin/license'),
-  activateLicense:(key:string)=>request<LicenseStatus>('/api/admin/license','PUT',{key}),
-  clearLicense:()=>request<LicenseStatus>('/api/admin/license','PUT',{clear:true}),
   health:()=>request<{status:string;cmsConfigured:boolean}>('/api/health'),
   theme:async(platform:Platform='mobile'):Promise<{theme:Theme;version:number;template:string}>=>{
     setClientPlatform(platform);try{const runtime=await request<{config:Partial<Theme>;version:number}>('/api/runtime?platform='+platform);return {theme:normalizeTheme({...defaults,...runtime.config,carousel:{...defaults.carousel,...runtime.config.carousel}} as Theme),version:runtime.version,template:'bundled-client'};}
@@ -33,12 +29,13 @@ export const api={
   setupCheck:(base:string)=>request<CmsStatus>('/api/admin/setup/check','POST',{base}),
   completeSetup:(username:string,password:string,base:string)=>request<SetupStatus>('/api/admin/setup/complete','POST',{username,password,base}),
   account:(currentPassword:string,username:string,password:string)=>request('/api/admin/account','PUT',{currentPassword,username,password}),
-  catalog:(page=1,keyword='',category='',ids='')=>request<Catalog>('/api/catalog?page='+page+'&keyword='+encodeURIComponent(keyword)+'&category='+encodeURIComponent(category)+'&ids='+encodeURIComponent(ids)),
+  catalog:(page=1,keyword='',category='',ids='',orderBy='latest')=>request<Catalog>('/api/catalog?page='+page+'&keyword='+encodeURIComponent(keyword)+'&category='+encodeURIComponent(category)+'&ids='+encodeURIComponent(ids)+'&orderBy='+encodeURIComponent(orderBy)),
   categories:()=>request<{items:Category[]}>('/api/catalog/categories'),
   login:(username:string,password:string)=>request('/api/admin/login','POST',{username,password}),
   logout:()=>request('/api/admin/logout','POST',{}),state:(template='')=>request<StudioState>('/api/admin/state?template='+encodeURIComponent(template)),
   save:(theme:Theme,version:number,template='')=>request<StudioState>('/api/admin/draft','PUT',{theme,version,template}),
   publish:(version:number,template='')=>request<StudioState>('/api/admin/publish','POST',{version,template}),
+  rollback:(version:number,targetVersion:number,template='')=>request<StudioState>('/api/admin/rollback','POST',{version,targetVersion,template}),
   install:(name:string,data:string)=>request<StudioState>('/api/admin/install','POST',{name,data}),
   renameTemplate:(template:string,name:string,version:number)=>request<StudioState>('/api/admin/template/rename','PUT',{template,name,version}),
   removeTemplate:(template:string,version:number,unpublish:boolean)=>request<StudioState>('/api/admin/template/remove','POST',{template,version,unpublish}),

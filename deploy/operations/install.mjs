@@ -30,7 +30,7 @@ export async function install(input,{apply=false,nginxDir='/etc/nginx/conf.d',ng
  return {...summary,installed:true,credentialFile:path.join(config.state,'admin-credentials.json')};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
- const input={},options={},args=process.argv.slice(2),allowed=['domain','code','state','config','node','cert','key','user','port','license','publicKey','cmsRoots','cmsBase','allowPrivate','clientOrigins'];
+ const input={},options={},args=process.argv.slice(2),allowed=['domain','code','state','config','node','cert','key','user','port','cmsRoots','cmsBase','allowPrivate','clientOrigins'];
  for(let i=0;i<args.length;i++){const flag=args[i];if(flag==='--apply'){options.apply=true;continue;}const key=flag.replace(/^--/,'');if(!args[i+1])throw Error('参数缺少值：'+flag);if(['nginxDir','nginx'].includes(key))options[key]=args[++i];else if(allowed.includes(key))input[key]=args[++i];else throw Error('未知参数：'+flag);}
  install(input,options).then(v=>console.log(JSON.stringify(v,null,2))).catch(e=>{console.error(e.message);process.exitCode=1;});
 }

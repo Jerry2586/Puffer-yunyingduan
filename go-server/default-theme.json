@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 2,
+  "brand": {
+    "name": "河豚",
+    "tagline": "好故事，慢慢看。"
+  },
+  "colors": {
+    "background": "#000000",
+    "surface": "#151515",
+    "text": "#f4f4f4",
+    "muted": "#888888",
+    "accent": "#27c9e3"
+  },
+  "layout": {
+    "posterRadius": 3,
+    "density": "comfortable",
+    "heroStyle": "cinema"
+  },
+  "festival": {
+    "kind": "none",
+    "enabled": false
+  },
+  "announcement": {
+    "enabled": false,
+    "text": "在河豚，发现下一部好故事。",
+    "title": "公告",
+    "style": "strip",
+    "image": "",
+    "frequency": "launch",
+    "actionLabel": "知道了",
+    "page": "home",
+    "url": ""
+  },
+  "sections": [
+    {
+      "id": "editor-picks",
+      "title": "今日给您的专属推荐",
+      "subtitle": "",
+      "kind": "poster",
+      "source": "latest",
+      "categoryId": "",
+      "limit": 6,
+      "columns": 3,
+      "enabled": true,
+      "style": "grid3",
+      "page": "home",
+      "radius": 3,
+      "gap": 5,
+      "showScore": false,
+      "showNote": true,
+      "showTitle": true,
+      "showYear": false,
+      "showMore": true,
+      "orderBy": "latest",
+      "manualIds": "",
+      "ratio": "3/4"
+    },
+    {
+      "id": "weekend",
+      "title": "正在热播",
+      "subtitle": "",
+      "kind": "landscape",
+      "source": "latest",
+      "categoryId": "",
+      "limit": 4,
+      "columns": 2,
+      "enabled": true,
+      "style": "scroll",
+      "page": "home",
+      "radius": 3,
+      "gap": 5,
+      "showScore": false,
+      "showNote": true,
+      "showTitle": true,
+      "showYear": false,
+      "showMore": true,
+      "orderBy": "latest",
+      "manualIds": "",
+      "ratio": "3/4"
+    },
+    {
+      "id": "discover",
+      "title": "精选电影",
+      "subtitle": "",
+      "kind": "poster",
+      "source": "latest",
+      "categoryId": "",
+      "limit": 6,
+      "columns": 3,
+      "enabled": true,
+      "style": "grid3",
+      "page": "home",
+      "radius": 3,
+      "gap": 5,
+      "showScore": false,
+      "showNote": true,
+      "showTitle": true,
+      "showYear": false,
+      "showMore": true,
+      "orderBy": "latest",
+      "manualIds": "",
+      "ratio": "3/4"
+    }
+  ],
+  "skeleton": {
+    "kind": "cinema"
+  },
+  "features": {
+    "serviceMenu": true,
+    "member": true,
+    "shortdrama": true,
+    "schedule": true,
+    "ranking": true,
+    "memberCard": true
+  },
+  "navigation": [
+    {
+      "id": "home",
+      "label": "首页",
+      "page": "home",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "⌂",
+      "activeIcon": "⌂"
+    },
+    {
+      "id": "shortdrama",
+      "label": "短剧",
+      "page": "shortdrama",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "▷",
+      "activeIcon": "▷"
+    },
+    {
+      "id": "member",
+      "label": "会员",
+      "page": "member",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "♔",
+      "activeIcon": "♔"
+    },
+    {
+      "id": "schedule",
+      "label": "排期表",
+      "page": "schedule",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "▤",
+      "activeIcon": "▤"
+    },
+    {
+      "id": "ranking",
+      "label": "排行榜",
+      "page": "ranking",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "↗",
+      "activeIcon": "↗"
+    },
+    {
+      "id": "mine",
+      "label": "淘好片",
+      "page": "mine",
+      "categoryId": "",
+      "enabled": true,
+      "icon": "○",
+      "activeIcon": "○"
+    }
+  ],
+  "categories": [
+    {
+      "id": "recommend",
+      "label": "首页",
+      "categoryId": "",
+      "page": "home",
+      "enabled": true,
+      "icon": "",
+      "activeIcon": ""
+    },
+    {
+      "id": "movie",
+      "label": "电影",
+      "categoryId": "1",
+      "page": "category",
+      "enabled": true,
+      "icon": "",
+      "activeIcon": ""
+    },
+    {
+      "id": "series",
+      "label": "电视剧",
+      "categoryId": "2",
+      "page": "category",
+      "enabled": true,
+      "icon": "",
+      "activeIcon": ""
+    },
+    {
+      "id": "variety",
+      "label": "综艺",
+      "categoryId": "3",
+      "page": "category",
+      "enabled": true,
+      "icon": "",
+      "activeIcon": ""
+    },
+    {
+      "id": "animation",
+      "label": "动漫",
+      "categoryId": "4",
+      "page": "category",
+      "enabled": true,
+      "icon": "",
+      "activeIcon": ""
+    }
+  ],
+  "carousel": {
+    "style": "full",
+    "height": 210,
+    "radius": 3,
+    "margin": 8,
+    "fit": "cover",
+    "titlePosition": "bottom",
+    "indicator": "dots",
+    "effect": "slide",
+    "autoplay": true,
+    "interval": 5,
+    "muted": true,
+    "slides": []
+  },
+  "ads": [],
+  "pageStyles": {
+    "header": "search",
+    "member": "violet",
+    "mine": "card",
+    "navigation": "text",
+    "design": "youku"
+  },
+  "schedule": [],
+  "startup": {
+    "enabled": true,
+    "duration": 2,
+    "image": "",
+    "background": "#101014",
+    "showTagline": true
+  },
+  "clientSettings": {
+    "disclaimer": "",
+    "privacy": "",
+    "about": "",
+    "latestVersion": "",
+    "updateNotes": "",
+    "androidUrl": "",
+    "iosUrl": "",
+    "notifyOnLaunch": true,
+    "forceUpdate": false
+  }
+}

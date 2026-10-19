@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import net from 'node:net';
+import http from 'node:http';
+import {spawn} from 'node:child_process';
+import {createHash,scryptSync} from 'node:crypto';
+import {migrateNodeState} from './migrate-node-state.mjs';
+import {defaultTheme} from '../../server/theme.mjs';
+import {initializeOperations} from '../../server/operations.mjs';
+const infoPath=process.env.HETUN_OPERATIONS_BUILD_INFO;if(!infoPath)throw Error('请设置 HETUN_OPERATIONS_BUILD_INFO 为 Go 构建信息绝对路径');
+const info=JSON.parse(await fs.readFile(infoPath,'utf8')),verification=path.join(path.dirname(infoPath),'verification','go-'+Date.now());await fs.mkdir(verification,{recursive:true});
+const native=info.targets.find(t=>t.target===(process.platform==='win32'?'windows':process.platform)+'-'+(os.arch()==='x64'?'amd64':os.arch()));if(!native)throw Error('当前系统没有可运行的成品');
+const listen=s=>new Promise((resolve,reject)=>{s.once('error',reject);s.listen(0,'127.0.0.1',()=>resolve(s.address().port));});
+const close=s=>new Promise(resolve=>{s.closeAllConnections?.();s.close(resolve);});
+const freePort=async()=>{const s=net.createServer(),port=await listen(s);await close(s);return port;};
+const run=(exe,args,cwd)=>new Promise((resolve,reject)=>{const child=spawn(exe,args,{cwd,windowsHide:true,stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);child.once('error',reject);child.once('exit',code=>code===0?resolve(output):reject(Error('命令失败 '+code+': '+output)));});
+async function stop(child){if(child.exitCode!==null)return;await new Promise(resolve=>{const timer=setTimeout(()=>{child.kill('SIGKILL');resolve();},3000);child.once('exit',()=>{clearTimeout(timer);resolve();});child.kill();});}
+const sha=async f=>createHash('sha256').update(await fs.readFile(f)).digest('hex');
+test('三个独立成品归档与 SHA256 清单有效，无依赖目录或运行凭据',async()=>{
+ assert.equal(info.version,JSON.parse(await fs.readFile(new URL('../../package.json',import.meta.url),'utf8')).version);assert.equal(info.targets.length,3);
+ for(const target of info.targets){assert.equal(await sha(target.archive),target.sha256);const dest=path.join(verification,target.target);await fs.mkdir(dest);await run('tar',['-xzf',target.archive,'-C',dest]);const extracted=dest,manifest=JSON.parse(await fs.readFile(path.join(extracted,'release-manifest.json'),'utf8'));assert.equal(manifest.target,target.target);
+ for(const [name,hash] of Object.entries(manifest.files)){assert.doesNotMatch(name,/node_modules|state\.json|initial-admin|license|\.env|server\//i);assert.equal(await sha(path.join(extracted,name)),hash);}
+ const binary=path.join(extracted,path.basename(target.binary)),bytes=await fs.readFile(binary);assert.equal(bytes.subarray(0,target.target.startsWith('linux')?4:2).toString('hex'),target.target.startsWith('linux')?'7f454c46':'4d5a');
+ assert.ok(manifest.files['config.example.json']);assert.ok(manifest.files['cms-adapter/Hetun.php']);
+ }
+});
+test('实际 Go 成品：嵌入界面、初始化、四端发布、权限、重启和备份恢复',async t=>{
+ const dir=path.join(verification,'runtime');await fs.mkdir(dir);const port=await freePort(),origin='http://127.0.0.1:'+port,configPath=path.join(dir,'config.json'),data=path.join(dir,'state');
+ const cms=http.createServer((_req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({code:1,page:1,pagecount:1,total:1,class:[{type_id:1,type_name:'隔离分类'}],list:[{vod_id:1,vod_name:'隔离内容',vod_play_url:'must-not-leak'}]}));});const cmsOrigin='http://127.0.0.1:'+await listen(cms);t.after(()=>close(cms));
+ const config={listen:'127.0.0.1:'+port,publicOrigin:origin,dataDir:data,storage:'file',allowPrivateCMS:true,clientOrigins:[]};await fs.writeFile(configPath,JSON.stringify(config));
+ await run(native.binary,['--config',configPath,'--check-config']);let child,logs='';t.after(async()=>{if(child)await stop(child);});
+ async function boot(){child=spawn(native.binary,['--config',configPath],{windowsHide:true,stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);for(let i=0;i<120;i++){if(child.exitCode!==null)throw Error('进程退出 '+logs);try{if((await fetch(origin+'/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,50));}throw Error('启动超时 '+logs);}
+ await boot();let cookie='';const headers=()=>({'Content-Type':'application/json',Origin:origin,'X-Hetun-Client':'studio',Cookie:cookie});
+ const call=async(route,method='GET',input)=>{const res=await fetch(origin+route,{method,headers:headers(),...(input?{body:JSON.stringify(input)}:{})});if(res.headers.get('set-cookie'))cookie=res.headers.get('set-cookie').split(';')[0];return res;};
+ const health=await (await call('/api/health')).json();assert.equal(health.runtime,'Go');assert.equal(health.version,info.version);assert.equal(health.product,'operations-center');assert.equal(health.authorization,undefined);
+ const html=await (await fetch(origin+'/')).text();assert.match(html,/assets\//);assert.doesNotMatch(html,/前端尚未构建/);const scripts=[...html.matchAll(/src="([^"#]+\.js)"/g)];assert.ok(scripts.length);for(const [,url] of scripts){const res=await fetch(new URL(url,origin));assert.equal(res.status,200);assert.doesNotMatch(await res.text(),/LicenseCenter|授权管理|激活授权/);}
+ assert.equal((await call('/api/admin/state')).status,401);const login=JSON.parse(await fs.readFile(path.join(data,'initial-admin.json'),'utf8'));assert.equal((await call('/api/admin/login','POST',login)).status,200);assert.equal((await call('/api/admin/setup/complete','POST',{base:cmsOrigin,username:'owner',password:'IsolatedPass12345'})).status,200);await assert.rejects(()=>fs.access(path.join(data,'initial-admin.json')));
+ for(const route of ['/api/admin/license','/api/admin/activate','/api/admin/install','/api/admin/export'])assert.equal((await call(route,'PUT',{})).status,404);
+ for(const route of ['/config.json','/state.json','/initial-admin.json'])assert.notEqual((await fetch(origin+route)).status,200);
+ for(const platform of ['mobile','tablet','tv','web']){const state=await (await call('/api/admin/state?template=runtime-'+platform)).json(),theme=structuredClone(state.draft);theme.sections[0].title=platform+' published';theme.brand.name='cannot-change-packaged-brand';const save=await call('/api/admin/draft','PUT',{template:'runtime-'+platform,version:state.version,theme});assert.equal(save.status,200);const saved=await save.json();assert.equal((await call('/api/admin/publish','POST',{template:'runtime-'+platform,version:saved.version})).status,200);}
+ const bootstrap=await (await fetch(origin+'/api/bootstrap?platform=tv&os=android&version=1.0.0')).json();assert.equal(bootstrap.config.sections[0].title,'tv published');assert.equal(bootstrap.config.brand,undefined);assert.equal(bootstrap.contract,'hetun-operations-v1');assert.equal((await fetch(origin+'/api/catalog')).status,200);
+ assert.equal((await fetch(origin+'/api/admin/publish',{method:'POST',headers:{...headers(),Origin:'https://foreign.test'},body:'{}'})).status,403);
+ await stop(child);const backup=path.join(dir,'backup.json');await run(native.binary,['--config',configPath,'--backup',backup]);const saved=JSON.parse(await fs.readFile(backup,'utf8'));assert.equal(saved.admin.password,undefined);assert.equal(saved.operations.tv.published.sections[0].title,'tv published');
+ await boot();assert.equal((await call('/api/admin/state')).status,401);assert.equal((await call('/api/admin/login','POST',{username:'owner',password:'IsolatedPass12345'})).status,200);assert.equal((await (await call('/api/admin/state?template=runtime-tv')).json()).published.sections[0].title,'tv published');await stop(child);
+ const restoreConfig=path.join(dir,'restore-config.json'),restoreDir=path.join(dir,'restored');await fs.writeFile(restoreConfig,JSON.stringify({...config,dataDir:restoreDir}));await run(native.binary,['--config',restoreConfig,'--import-state',backup]);const restored=JSON.parse(await fs.readFile(path.join(restoreDir,'state.json'),'utf8'));assert.deepEqual(restored.operations,saved.operations);await assert.rejects(()=>run(native.binary,['--config',restoreConfig,'--import-state',backup]),/目标必须/);
+ await fs.writeFile(path.join(verification,'acceptance.json'),JSON.stringify({version:info.version,nativeProcess:true,embeddedUI:true,noCommercialAuthorization:true,adminProtected:true,fourPlatforms:true,restartPersistent:true,backupRestore:true,isolatedCMS:true,mysqlProductionTested:false,productionDeployed:false},null,2));
+});
+test('旧 Node 状态转换保留运营和管理员摘要，清除商业数据且不覆盖文件',async()=>{
+ const dir=path.join(verification,'legacy'),dest=path.join(verification,'converted.json');await fs.mkdir(dir);const state={cmsBase:'https://cms.test',setup:{completedAt:new Date().toISOString()},license:{secret:'excluded'},draft:defaultTheme};initializeOperations(state);state.operations.tv.draft.sections[0].title='旧配置';const salt='abcd'.repeat(8),admin={username:'owner',salt,hash:scryptSync('FixturePassword123',salt,32).toString('hex')};await fs.writeFile(path.join(dir,'theme-state.json'),JSON.stringify(state));await fs.writeFile(path.join(dir,'admin-credentials.json'),JSON.stringify(admin));await migrateNodeState(dir,dest);const converted=JSON.parse(await fs.readFile(dest,'utf8'));assert.equal(converted.operations.tv.draft.sections[0].title,'旧配置');assert.equal(converted.admin.hash,admin.hash);assert.equal(converted.admin.algorithm,'scrypt');assert.equal(converted.license,undefined);assert.equal(converted.admin.password,undefined);await assert.rejects(()=>migrateNodeState(dir,dest),{code:'EEXIST'});
+});
+
+test('实际成品：空目录安装入口、重启及私有文件隔离',async t=>{
+ const dir=path.join(verification,'first-install');await fs.mkdir(dir);const port=await freePort(),origin='http://127.0.0.1:'+port,configPath=path.join(dir,'config.json');let child,logs='';t.after(async()=>{if(child)await stop(child);});
+ async function boot(){child=spawn(native.binary,['--config',configPath,'--listen','127.0.0.1:'+port],{cwd:dir,windowsHide:true,stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);for(let i=0;i<120;i++){if(child.exitCode!==null)throw Error('安装进程退出 '+logs);try{if((await fetch(origin+'/api/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,50));}throw Error('安装启动超时');}
+ await boot();assert.equal((await (await fetch(origin+'/api/health')).json()).status,'installation-required');const token=(await fs.readFile(path.join(dir,'data/install-token.txt'),'utf8')).trim(),route='/install/'+token;assert.match(token,/^[a-f0-9]{64}$/);let page=await fetch(origin+route);assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);assert.match(await page.text(),/安装河豚运营中心/);for(const route of ['/','/config.json','/data/install-token.txt','/api/admin/state'])assert.equal((await fetch(origin+route)).status,404);
+ await stop(child);await boot();assert.equal((await fetch(origin+route)).status,200);assert.equal((await fs.readFile(path.join(dir,'data/install-token.txt'),'utf8')).trim(),token);await assert.rejects(()=>fs.access(configPath));
+ if(!process.env.HETUN_TEST_MYSQL_DSN){t.diagnostic('本地未提供隔离 MySQL，真实数据库安装由 Linux CI 执行');return;}
+ const input={publicOrigin:origin,host:'127.0.0.1',port:3306,database:'hetun_test',username:'root',password:process.env.HETUN_TEST_MYSQL_PASSWORD,admin:'release_owner',adminPassword:'ReleaseIsolated12345'};
+ const install=action=>fetch(origin+route+'/'+action,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-Hetun-Install':'1'},body:JSON.stringify(input)});
+ for(const action of ['test','complete']){const response=await install(action);assert.equal(response.status,200,await response.text());}
+ assert.equal((await fetch(origin+route)).status,404);const saved=JSON.parse(await fs.readFile(configPath,'utf8'));assert.equal(saved.storage,'mysql');await assert.rejects(()=>fs.access(path.join(dir,'data/install-token.txt')));
+ async function login(){const response=await fetch(origin+'/api/admin/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-Hetun-Client':'studio'},body:JSON.stringify({username:input.admin,password:input.adminPassword})});assert.equal(response.status,200);return response.headers.get('set-cookie').split(';')[0];}
+ let cookie=await login();let state=await (await fetch(origin+'/api/admin/setup',{headers:{Cookie:cookie}})).json();assert.equal(state.installed,true);assert.equal(state.cmsConfigured,false);await stop(child);await boot();cookie=await login();assert.equal((await fetch(origin+route)).status,404);assert.equal((await fetch(origin+'/api/admin/state',{headers:{Cookie:cookie}})).status,200);
+});

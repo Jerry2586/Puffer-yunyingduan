@@ -56,3 +56,9 @@ operations.env
 *.ipa
 *.exe
 *.msi
+
+# Local Go installation configuration and state
+config.json
+initial-admin.json
+install-token.txt
+data/
