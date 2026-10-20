@@ -13,7 +13,7 @@ const operationsCenter=import.meta.env.VITE_HETUN_OPERATIONS_CENTER==='1';
 const centerName=themeDesktop?'主题中心':operationsCenter?'运营中心':'影视中心';
 const centerEnglish=themeDesktop?'HETUN THEME STUDIO':operationsCenter?'HETUN OPERATIONS CENTER':'HETUN CINEMA CENTER';
 type StudioGroup={id:string;label:string;description:string;entries:readonly {id:string;icon:string;label:string;en:string}[]};
-const systemNavigation:StudioGroup={id:'system',label:'系统管理',description:'服务、连接与管理员',entries:[{id:'system-overview',icon:'◫',label:'系统概览',en:'System overview'},{id:'system-config',icon:'⚙',label:'服务配置',en:'Server configuration'},{id:'system-source',icon:'⇄',label:'内容源与连接',en:'Content sources'},{id:'system-domains',icon:'◎',label:'App 接口与域名',en:'App connections'},{id:'system-logs',icon:'▤',label:'日志查看',en:'Audit logs'}]};
+const systemNavigation:StudioGroup={id:'system',label:'系统管理',description:'服务、连接与管理员',entries:[{id:'system-overview',icon:'◫',label:'系统概览',en:'System overview'},{id:'system-config',icon:'⚙',label:'服务配置',en:'Server configuration'},{id:'system-source',icon:'⇄',label:'内容源与连接',en:'Content sources'},{id:'system-domains',icon:'◎',label:'App 接口与域名',en:'App connections'},{id:'system-logs',icon:'▤',label:'日志查看',en:'Audit logs'},{id:'system-updates',icon:'↻',label:'系统更新',en:'System updates'}]};
 const studioNavigation:readonly StudioGroup[]=themeDesktop?[{id:'theme',label:'主题制作',description:'骨架、视觉与页面设计',entries:[...allStudioNavigation[0].entries,allStudioNavigation[1].entries[0]]},{id:'connection',label:'预览内容',description:'绑定真实内容用于设计',entries:[allStudioNavigation[1].entries.find(entry=>entry.id==='connection')!]}]:operationsCenter?[{...allStudioNavigation[1],entries:[...allStudioNavigation[1].entries.filter(e=>e.id!=='connection').map(e=>e.id==='settings'?{...e,label:'版本管理',en:'App releases'}:e),{id:'policies',icon:'▤',label:'应用文档',en:'Privacy & about'}]},systemNavigation]:allStudioNavigation;
 const desktopBridge=()=> (window as any).hetunTheme;
 async function desktopSettings(){await desktopBridge()?.settings();}
@@ -72,7 +72,8 @@ const navIconPaths:Record<string,string>={
  'system-config':'M4 6h16 M4 18h16 M8 3v6 M16 15v6 M4 12h16',
  'system-source':'M9 8H7a4 4 0 0 0 0 8h3 M15 8h2a4 4 0 0 1 0 8h-3 M8 12h8',
  'system-domains':'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M3 12h18 M12 3c-5 5-5 13 0 18 M12 3c5 5 5 13 0 18',
- 'system-logs':'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5'
+ 'system-logs':'M5 3h14v18H5z M8 7h8 M8 11h8 M8 15h5',
+ 'system-updates':'M20 7v5h-5 M4 17v-5h5 M6 7a7 7 0 0 1 12-1l2 2 M4 16l2 2a7 7 0 0 0 12-1'
 };
 function navIcon(id:string){const color=centerMode.value==='light'?'#62736c':'#9cafaa';return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${navIconPaths[id]||navIconPaths['system-overview']}"/></svg>`);}
 

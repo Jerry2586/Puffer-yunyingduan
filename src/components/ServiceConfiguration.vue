@@ -2,7 +2,6 @@
 import {ref,onMounted,computed} from 'vue';
 import {systemApi,type SystemConfig,type SystemConfigValues} from '@/services/api';
 import ConnectionSettingsPanel from './ConnectionSettingsPanel.vue';
-import SystemUpdatePanel from './SystemUpdatePanel.vue';
 const tab=ref('base');
 const config=ref<SystemConfig|null>(null),busy=ref(''),error=ref(''),message=ref('');
 const port=ref(''),host=ref(''),prefix=ref(''),origin=ref(''),origins=ref('');
@@ -13,8 +12,8 @@ async function save(section:string){if(busy.value)return;busy.value=section;erro
 function copy(data:string){uni.setClipboardData({data});}
 onMounted(load);
 </script>
-<template><view class="service-settings"><view class="page-head"><view><text class="eyebrow">SYSTEM / CONFIGURATION</text><h2>服务配置</h2><text class="muted">管理服务入口、数据库、Redis 与系统更新。配置直接读写当前服务器。</text></view><text class="badge">服务器配置</text></view>
-<view class="tabs" role="tablist" aria-label="服务配置分类"><button v-for="t in [{id:'base',name:'基础服务'},{id:'connections',name:'连接配置'},{id:'updates',name:'系统更新'}]" :key="t.id" role="tab" :aria-selected="tab===t.id" :class="{selected:tab===t.id}" @click="tab=t.id">{{t.name}}</button></view>
+<template><view class="service-settings"><view class="page-head"><view><text class="eyebrow">SYSTEM / CONFIGURATION</text><h2>服务配置</h2><text class="muted">管理服务入口、数据库与 Redis。配置直接读写当前服务器。</text></view><text class="badge">服务器配置</text></view>
+<view class="tabs" role="tablist" aria-label="服务配置分类"><button v-for="t in [{id:'base',name:'基础服务'},{id:'connections',name:'连接配置'}]" :key="t.id" role="tab" :aria-selected="tab===t.id" :class="{selected:tab===t.id}" @click="tab=t.id">{{t.name}}</button></view>
 <view v-show="tab==='base'"><view class="status-bar"><text><text class="status-dot" :class="{pending:config?.restartRequired}"></text>{{config?(config.restartRequired?'有配置等待重启生效':'配置与运行状态一致'):(busy?'正在读取服务器配置':'配置尚未读取')}}<text v-if="dirty"> · 有未保存输入</text></text><button :disabled="!!busy" @click="load">{{busy==='load'?'读取中…':'重新读取'}}</button></view>
 <text v-if="error" class="notice error" role="alert">{{error}}</text><text v-if="message" class="notice" role="status">{{message}}</text><text v-if="config?.restartRequired" class="notice pending-note">已保存值待重启生效。请在宝塔进程管理中重启运营服务；修改端口时同步调整反向代理，修改入口后使用新入口进入。</text>
 <template v-if="config"> <view class="config-card"><view class="card-head"><view class="head-title"><text>服务监听</text><text class="badge">重启生效</text></view><button class="primary" :disabled="!!busy||!config.writable" @click="save('listen')">{{busy==='listen'?'保存中…':'保存'}}</button></view>
@@ -25,5 +24,5 @@ onMounted(load);
  <details><summary>运行目录与服务身份 · 只读信息</summary><view class="detail-grid"><view class="config-card"><view class="card-head"><view class="head-title"><text>日志与存储</text></view><text class="badge">实际运行信息</text></view><view class="card-body"><view class="read-only-row"><text>存储方式</text><strong>{{config.storage==='mysql'?'MySQL 数据库':'本机文件 · 预览模式'}}</strong></view><view class="read-only-row"><text>数据目录</text><text class="small-code" selectable>{{config.dataDir}}</text></view><view class="read-only-row"><text>操作审计文件</text><text class="small-code" selectable>{{config.auditPath}}</text></view><text class="help">操作审计写入当前数据目录，可在“日志查看”读取与下载。进程运行日志在宝塔进程管理中查看。</text></view></view>
  <view class="config-card"><view class="card-head"><view class="head-title"><text>接入身份</text></view><text class="badge">已启用签名验证</text></view><view class="card-body"><view class="read-only-row"><text>签名算法</text><strong>{{config.identity.algorithm}}</strong></view><view class="read-only-row"><text>服务公钥指纹 · SHA-256</text><text class="small-code fingerprint" selectable>{{config.identity.fingerprint}}</text></view><view class="inline-actions"><button @click="copy(config.identity.fingerprint)">复制指纹</button></view><text class="help">打包器校验签名目录与服务身份。身份由本机密钥生成并持久保存，管理员密码与私钥不会放入接入链接。</text></view></view></view>
 </details> <text v-if="!config.writable" class="notice error">当前实例没有可写配置文件，无法保存设置。</text>
- </template></view><ConnectionSettingsPanel v-show="tab==='connections'"/><SystemUpdatePanel v-if="tab==='updates'"/></view></template>
+ </template></view><ConnectionSettingsPanel v-show="tab==='connections'"/></view></template>
 <style scoped src="../styles/service-forms.css"></style>
