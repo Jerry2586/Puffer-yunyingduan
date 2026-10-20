@@ -369,3 +369,53 @@ func TestOperationalValidationAndConfig(t *testing.T) {
 		t.Fatal("obsolete commercial config accepted")
 	}
 }
+
+func TestAdministratorPasswordChoice(t *testing.T) {
+	for _, password := range []string{"1", "abc", "中文", strings.Repeat("x", 300)} {
+		c, err := credentials("owner", password)
+		if err != nil {
+			t.Fatal("chosen password rejected", err)
+		}
+		if !matches(c, password) || matches(c, password+"wrong") {
+			t.Fatal("password matching failed")
+		}
+	}
+	if _, err := credentials("owner", ""); err == nil {
+		t.Fatal("empty password accepted")
+	}
+}
+
+func TestLegacyAdminEntryRedirectsToShortEntry(t *testing.T) {
+	c := config{Listen: "127.0.0.1:8787", PublicOrigin: "http://127.0.0.1:8787", DataDir: t.TempDir(), Storage: "file", AdminPath: "/abcdef1234567890"}
+	c, err := validateConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := newApp(context.Background(), c, &fileStore{filepath.Join(t.TempDir(), "state.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.store.Close()
+	for _, entry := range []string{c.AdminPath, c.AdminPath + "/", "/abcdef/"} {
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, httptest.NewRequest("GET", c.PublicOrigin+entry, nil))
+		if w.Code != 307 || w.Header().Get("Location") != "/abcdef" {
+			t.Fatal("legacy entry did not redirect", w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	a.ServeHTTP(w, httptest.NewRequest("GET", c.PublicOrigin+"/abcdef", nil))
+	if w.Code != 200 {
+		t.Fatal("short entry unavailable", w.Code)
+	}
+	for _, entry := range []string{"/123456", "/abcdef1234567890"} {
+		c.AdminPath = entry
+		if _, err := validateConfig(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.AdminPath = "/abc"
+	if _, err := validateConfig(c); err == nil {
+		t.Fatal("invalid entry accepted")
+	}
+}

@@ -75,7 +75,7 @@ func newInstaller(configPath, listen string) (*installer, error) {
 	digest := sha256.Sum256([]byte(token))
 	return &installer{configPath: absolute, dataDir: dir, listen: listen, route: "/install/" + token, installationID: hex.EncodeToString(digest[:]), connect: func(dsn string) (store, error) { return openMySQL(dsn) }, probe: probeMySQL}, nil
 }
-func (i *installer) adminPath() string { return "/" + strings.TrimPrefix(i.route, "/install/")[:16] }
+func (i *installer) adminPath() string { return "/" + strings.TrimPrefix(i.route, "/install/")[:6] }
 func probeMySQL(ctx context.Context, dsn string) error {
 	db, e := sql.Open("mysql", dsn)
 	if e != nil {
@@ -150,7 +150,7 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	i.mu.RUnlock()
 	if active != nil {
 		if strings.HasPrefix(r.URL.Path, "/install/") {
-			http.NotFound(w, r)
+			jsonResponse(w, 404, M{"error": "安装入口已关闭", "code": "installation_closed"})
 			return
 		}
 		active.ServeHTTP(w, r)
@@ -168,6 +168,10 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, i.adminPath(), http.StatusTemporaryRedirect)
 		return
 	}
+	if r.Method == "GET" && r.URL.Path == "/"+strings.TrimPrefix(i.route, "/install/")[:16] {
+		http.Redirect(w, r, i.adminPath(), http.StatusTemporaryRedirect)
+		return
+	}
 	if r.URL.Path != i.adminPath() && r.URL.Path != i.route && r.URL.Path != i.route+"/test" && r.URL.Path != i.route+"/complete" {
 		http.NotFound(w, r)
 		return
@@ -176,7 +180,7 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		nonce := randomToken()
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, strings.ReplaceAll(strings.ReplaceAll(installHTML, "NONCE_PLACEHOLDER", nonce), "INSTALL_ENDPOINT_PLACEHOLDER", i.route))
+		io.WriteString(w, strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(installHTML, "NONCE_PLACEHOLDER", nonce), "INSTALL_ENDPOINT_PLACEHOLDER", i.route), "ADMIN_ENTRY_PLACEHOLDER", i.adminPath()))
 		return
 	}
 	origin, e := url.Parse(r.Header.Get("Origin"))

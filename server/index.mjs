@@ -64,7 +64,7 @@ let discovering;
 const discover=()=>discovering||(discovering=discoverCms({roots:cmsRoots,check:checkCms,explicitBase:process.env.HETUN_CMS_BASE||''}).finally(()=>{discovering=null;}));
 const audit=async(event,details={})=>fs.appendFile(path.join(dataDir,'audit.jsonl'),JSON.stringify({at:new Date().toISOString(),event,...details})+'\n',{mode:0o600});
 const setupStatus=()=>({installed:!!state.setup?.completedAt,completedAt:state.setup?.completedAt||'',cmsConfigured:!!state.cmsBase,publicOrigin:configuredOrigin||'',localPreview:localOperations,username:credentials.username});
-function newCredentials(username,password){if(typeof username!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(username))throw Error('账号需为3–40位字母、数字或下划线。');if(typeof password!=='string'||password.length<12||password.length>128||!/[A-Za-z]/.test(password)||!/[0-9]/.test(password))throw Error('密码需为12–128位，包含字母和数字。');const salt=randomBytes(16).toString('hex');return {username,salt,hash:scryptSync(password,salt,32).toString('hex')};}
+function newCredentials(username,password){if(typeof username!=='string'||!/^[A-Za-z0-9_]{3,40}$/.test(username))throw Error('账号需为3–40位字母、数字或下划线。');if(typeof password!=='string'||password.length===0)throw Error('密码不能为空。');const salt=randomBytes(16).toString('hex');return {username,salt,hash:scryptSync(password,salt,32).toString('hex')};}
 
 if(host !== '127.0.0.1' && !configuredOrigin) throw new Error('开放远程服务前必须设置 HETUN_PUBLIC_ORIGIN 为实际 HTTPS 前端地址。');
 function send(res,status,data) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}); res.end(JSON.stringify(data)); }

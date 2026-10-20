@@ -42,7 +42,7 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	storage := &fileStore{filepath.Join(t.TempDir(), "state.json")}
 	i.connect = func(string) (store, error) { return storage, nil }
 	i.probe = func(context.Context, string) error { return nil }
-	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Password: "db@pass:/?#", Admin: "owner", AdminPassword: "StrongLocal12345"}
+	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Password: "db@pass:/?#", Admin: "owner", AdminPassword: "1"}
 	c, e := i.configuration(v)
 	if e != nil {
 		t.Fatal(e)
@@ -81,7 +81,7 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 		t.Fatal("test wrote database")
 	}
 	bad := v
-	bad.AdminPassword = "short"
+	bad.AdminPassword = ""
 	if w = installRequest(i, "POST", i.route+"/complete", bad, v.PublicOrigin); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
@@ -122,7 +122,7 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	if wEntry.Code != 200 {
 		t.Fatal("saved admin entry unavailable", wEntry.Code)
 	}
-	r := httptest.NewRequest("POST", v.PublicOrigin+"/api/admin/login", strings.NewReader(`{"username":"owner","password":"StrongLocal12345"}`))
+	r := httptest.NewRequest("POST", v.PublicOrigin+"/api/admin/login", strings.NewReader(`{"username":"owner","password":"1"}`))
 	r.Header.Set("Origin", v.PublicOrigin)
 	r.Header.Set("X-Hetun-Client", "studio")
 	w = httptest.NewRecorder()

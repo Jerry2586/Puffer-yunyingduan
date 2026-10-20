@@ -85,8 +85,8 @@ func credentials(username, password string) (credential, error) {
 	if !regexp.MustCompile(`^[A-Za-z0-9_]{3,40}$`).MatchString(username) {
 		return credential{}, problem(400, "账号需为3–40位字母、数字或下划线")
 	}
-	if len(password) < 12 || len(password) > 128 || !regexp.MustCompile(`[A-Za-z]`).MatchString(password) || !regexp.MustCompile(`[0-9]`).MatchString(password) {
-		return credential{}, problem(400, "密码需为12–128位，包含字母和数字")
+	if password == "" {
+		return credential{}, problem(400, "密码不能为空")
 	}
 	salt := randomToken()[:32]
 	key, e := scrypt.Key([]byte(password), []byte(salt), 16384, 8, 1, 32)
@@ -96,9 +96,6 @@ func credentials(username, password string) (credential, error) {
 	return credential{username, salt, hex.EncodeToString(key), "scrypt"}, nil
 }
 func matches(c credential, password string) bool {
-	if len(password) > 200 {
-		return false
-	}
 	key, e := scrypt.Key([]byte(password), []byte(c.Salt), 16384, 8, 1, 32)
 	if e != nil {
 		return false
@@ -527,11 +524,12 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		return problem(400, "路径无效")
 	}
 	if a.config.AdminPath != "" {
-		if route == a.config.AdminPath+"/" {
-			http.Redirect(w, r, a.config.AdminPath, http.StatusTemporaryRedirect)
+		entry := shortAdminPath(a.config.AdminPath)
+		if route == entry+"/" || (entry != a.config.AdminPath && (route == a.config.AdminPath || route == a.config.AdminPath+"/")) {
+			http.Redirect(w, r, entry, http.StatusTemporaryRedirect)
 			return nil
 		}
-		if route == a.config.AdminPath {
+		if route == entry {
 			r2 := r.Clone(r.Context())
 			u := *r.URL
 			u.Path = "/"

@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var buildVersion = "0.3.2"
+var buildVersion = "0.3.3"
 var errNoState = sql.ErrNoRows
 
 func loadConfig(name string) (config, error) {
@@ -47,7 +47,7 @@ func validateConfig(c config) (config, error) {
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return c, fmt.Errorf("访问地址必须使用 HTTP 或 HTTPS")
 	}
-	if c.AdminPath != "" && !regexp.MustCompile("^/[a-f0-9]{16}$").MatchString(c.AdminPath) {
+	if c.AdminPath != "" && !regexp.MustCompile("^/([a-f0-9]{6}|[a-f0-9]{16})$").MatchString(c.AdminPath) {
 		return c, fmt.Errorf("后台入口格式不正确")
 	}
 	if !filepath.IsAbs(c.DataDir) {
@@ -174,7 +174,7 @@ func run() error {
 		return nil
 	}
 	if c.AdminPath == "" {
-		c.AdminPath = "/" + randomToken()[:16]
+		c.AdminPath = "/" + randomToken()[:6]
 		b, err := json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return err
@@ -187,7 +187,16 @@ func run() error {
 	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	return serve(c.Listen, a)
 }
+
+// Keep persisted legacy entries valid while using a shorter canonical address.
+func shortAdminPath(entry string) string {
+	if len(entry) == 17 {
+		return entry[:7]
+	}
+	return entry
+}
 func logStartup(listen, origin, adminPath string, installing bool) {
+	adminPath = shortAdminPath(adminPath)
 	_, port, _ := net.SplitHostPort(listen)
 	log.Print("========================================")
 	log.Printf("河豚运营中心 %s", buildVersion)
