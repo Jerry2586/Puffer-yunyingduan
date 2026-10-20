@@ -127,6 +127,33 @@ func scanCMSSites(roots []string) ([]M, []string) {
 	}
 	return candidates, warnings
 }
+
+// Prefer a saved address only when exactly one discovered site's known aliases match.
+// Stale CMS metadata must not turn one local site into two selectable sources.
+func preferKnownCMSAddress(candidates []M, address string) {
+	u, err := cmsEndpoint(address)
+	if address == "" || err != nil {
+		return
+	}
+	base := u.String()
+	var matched M
+	for _, c := range candidates {
+		addresses, _ := c["addresses"].([]M)
+		for _, alias := range addresses {
+			if str(alias["base"]) == base {
+				if matched != nil {
+					return
+				}
+				matched = c
+				break
+			}
+		}
+	}
+	if matched != nil {
+		matched["base"] = base
+	}
+}
+
 func (a *app) discoverAndConnect(parent context.Context) M {
 	a.discoveryMu.Lock()
 	defer a.discoveryMu.Unlock()
@@ -143,6 +170,7 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	if explicit == "" {
 		explicit = a.config.CMSBase
 	}
+	preferKnownCMSAddress(candidates, explicit)
 	seen := map[string]bool{}
 	for _, c := range candidates {
 		if str(c["base"]) != "" {

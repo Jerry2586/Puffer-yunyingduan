@@ -170,3 +170,23 @@ func TestDiscoveryRetainsHealthyUnnormalizedSelectionAmongMultipleSites(t *testi
 		t.Fatal("healthy selection was overwritten")
 	}
 }
+
+func TestKnownCMSAddressPreservesAliasWithoutMergingOtherSites(t *testing.T) {
+	root := t.TempDir()
+	fakeCMSSite(t, root, "cms.example.test", "https://stale.example.invalid")
+	sites, _ := scanCMSSites([]string{root})
+	preferKnownCMSAddress(sites, "cms.example.test")
+	if sites[0]["base"] != "https://cms.example.test/api.php/provide/vod/" {
+		t.Fatal("saved directory alias lost", sites)
+	}
+	preferKnownCMSAddress(sites, "https://unrelated.example.test")
+	if sites[0]["base"] != "https://cms.example.test/api.php/provide/vod/" {
+		t.Fatal("unverified alias accepted")
+	}
+	other := M{"base": "https://other.example.test/api.php/provide/vod/", "addresses": []M{{"base": "https://cms.example.test/api.php/provide/vod/"}}}
+	sites = append(sites, other)
+	preferKnownCMSAddress(sites, "https://cms.example.test")
+	if other["base"] != "https://other.example.test/api.php/provide/vod/" {
+		t.Fatal("ambiguous alias merged")
+	}
+}

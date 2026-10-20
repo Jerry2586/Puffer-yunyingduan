@@ -166,6 +166,32 @@ func TestCMSLocalReadWithPublicAPIOff(t *testing.T) {
 	if strings.Contains(raw, cfg.Passwd) && cfg.Passwd != "" {
 		t.Fatal("password leaked")
 	}
+	t.Run("saved directory alias upgrades to local despite stale metadata", func(t *testing.T) {
+		aliasRoot := t.TempDir()
+		aliasSite := fakeCMSSite(t, aliasRoot, "cms.example.test", "https://stale.example.invalid")
+		if err := os.WriteFile(filepath.Join(aliasSite, "application", "database.php"), []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+		aliasBase := "https://cms.example.test/api.php/provide/vod/"
+		ah := newHarness(t, "")
+		ah.a.config.CMSRoots = []string{aliasRoot}
+		if err := ah.a.change(context.Background(), "test", func(next *state) error { next.CMSBase = aliasBase; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		found := ah.a.discoverAndConnect(context.Background())
+		if found["multiple"] != false || found["connectedBase"] != aliasBase || obj(found["currentReport"])["transport"] != "local" || ah.a.readState().CMSLocalRoot != aliasSite {
+			t.Fatal("alias upgrade failed", found)
+		}
+		candidates := found["candidates"].([]M)
+		if len(candidates) != 1 {
+			t.Fatal("same site duplicated", found)
+		}
+		chosen, selectedRoot, err := ah.a.selectedCMS(context.Background(), M{"base": aliasBase, "siteId": candidates[0]["id"]})
+		if err != nil || chosen["base"] != aliasBase || chosen["transport"] != "local" || selectedRoot != aliasSite {
+			t.Fatal("selection reverted to stale domain", chosen, err)
+		}
+	})
+
 	if requests.Load() != 0 {
 		t.Fatal("local reads depended on public API")
 	}

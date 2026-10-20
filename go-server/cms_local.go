@@ -412,6 +412,8 @@ func (a *app) selectedCMS(ctx context.Context, input M) (M, string, error) {
 	root := a.localRootFor(base)
 	if id := str(input["siteId"]); id != "" {
 		candidates, _ := scanCMSSites(a.cmsRoots())
+		addCMSBindings([]string{"/www/server/panel/vhost/nginx"}, candidates)
+		preferKnownCMSAddress(candidates, base)
 		found := false
 		for _, c := range candidates {
 			if str(c["id"]) == id {
