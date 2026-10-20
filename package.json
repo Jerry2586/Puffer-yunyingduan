@@ -1,6 +1,6 @@
 {
   "name": "hetun-app",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "scripts": {
     "dev:h5": "uni --host 127.0.0.1 --port 5173",
     "dev:app": "uni -p app",

@@ -12,7 +12,7 @@ const functions=['refreshSession','initialize'].map(name=>{
 }).join('\n');
 function harness(overrides={}){
  const cell=value=>({value});
- const c={api:{setup:async()=>({installed:true}),state:async()=>({version:1}),health:async()=>({version:'test'}),...overrides},operationsCenter:true,disposed:false,serverSetup:cell(null),authenticated:cell(false),checking:cell(true),startupError:cell(''),error:cell(''),loginError:cell(''),serviceVersion:cell(''),receive:state=>{c.received=state;},refreshCmsStatus:()=>{c.cmsCalls++;return new Promise(()=>{});},cmsCalls:0};
+ const c={api:{setup:async()=>({installed:true}),state:async()=>({version:1}),health:async()=>({version:'test'}),...overrides},operationsCenter:true,disposed:false,chosen:cell(null),device:cell("mobile"),serverSetup:cell(null),authenticated:cell(false),checking:cell(true),startupError:cell(''),error:cell(''),loginError:cell(''),serviceVersion:cell(''),receive:state=>{c.received=state;},refreshCmsStatus:()=>{c.cmsCalls++;return new Promise(()=>{});},cmsCalls:0};
  vm.createContext(c);vm.runInContext(functions,c);return c;
 }
 const bounded=p=>Promise.race([p,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('startup blocked')),500);timer.unref();})]);
