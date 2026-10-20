@@ -229,7 +229,7 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 	out := M{}
 	switch name {
 	case "profile":
-		profile, e := a.profile(r.Context(), s)
+		profile, e := a.cachedProfile(r.Context(), s, p, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		if e != nil {
 			return e
 		}
@@ -387,6 +387,9 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		return problem(400, "卡密接口尚未验证，暂不开放")
 	default:
 		return problem(404, "会员接口不支持")
+	}
+	if r.Method == "POST" {
+		s.ProfileVersion.Add(1)
 	}
 	jsonResponse(w, 200, out)
 	return nil

@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,33 +60,37 @@ type attempt struct {
 	Start time.Time
 }
 type memberSession struct {
-	Jar   http.CookieJar
-	Until time.Time
-	Base  string
-	Mu    sync.Mutex
+	ProfileVersion atomic.Uint64
+	Jar            http.CookieJar
+	Until          time.Time
+	Base           string
+	Mu             sync.Mutex
 }
 type app struct {
-	updater     *systemUpdater
-	mu          sync.RWMutex
-	state       state
-	store       store
-	config      config
-	cache       *contentCache
-	cms         *http.Client
-	sessions    map[string]adminSession
-	attempts    map[string]attempt
-	members     map[string]*memberSession
-	checkouts   map[string]checkout
-	epoch       int
-	assets      string
-	web         http.Handler
-	serviceKey  *rsa.PrivateKey
-	discoveryMu sync.Mutex
-	systemMu    sync.Mutex
-	configPath  string
-	startedAt   time.Time
-	requests    requestMonitor
-	outbound    outboundMonitor
+	searchMu      sync.Mutex
+	searchJobs    map[string]*searchJob
+	searchIndexes map[string]*searchIndex
+	updater       *systemUpdater
+	mu            sync.RWMutex
+	state         state
+	store         store
+	config        config
+	cache         *contentCache
+	cms           *http.Client
+	sessions      map[string]adminSession
+	attempts      map[string]attempt
+	members       map[string]*memberSession
+	checkouts     map[string]checkout
+	epoch         int
+	assets        string
+	web           http.Handler
+	serviceKey    *rsa.PrivateKey
+	discoveryMu   sync.Mutex
+	systemMu      sync.Mutex
+	configPath    string
+	startedAt     time.Time
+	requests      requestMonitor
+	outbound      outboundMonitor
 }
 
 func randomToken() string {
@@ -284,6 +289,9 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 	if handled, err := a.handleDirectory(w, r); handled {
 		return err
 	}
+	if strings.HasPrefix(route, "/api/ads/") {
+		return a.publicAds(w, r)
+	}
 	if route == "/api/health" && r.Method == "GET" {
 		v := a.readState()
 		jsonResponse(w, 200, M{"status": "ok", "service": "hetun", "product": "operations-center", "version": buildVersion, "runtime": "Go", "cmsConfigured": v.CMSBase != "", "contract": contract, "themeContract": "hetun-runtime-v1", "platforms": platforms})
@@ -340,6 +348,15 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		v := a.readState()
+		if strings.HasPrefix(route, "/api/admin/ads") {
+			return a.adminAds(w, r)
+		}
+		if route == "/api/admin/client-cache/search/rebuild" {
+			return a.adminRebuildSearch(w, r)
+		}
+		if route == "/api/admin/client-cache" || route == "/api/admin/client-cache/clear" {
+			return a.adminClientCache(w, r)
+		}
 		if route == "/api/admin/logout" && r.Method == "POST" {
 			a.mu.Lock()
 			delete(a.sessions, token)
@@ -509,7 +526,7 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if osName == "" {
 			osName = "android"
 		}
-		out, e := bootstrap(v, p, osName, r.URL.Query().Get("version"), a.serviceAddresses(v)[0])
+		out, e := a.cachedBootstrap(r.Context(), v, p, osName, r.URL.Query().Get("version"), a.serviceAddresses(v)[0])
 		if e != nil {
 			return e
 		}
@@ -520,7 +537,11 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		return coded(410, "主题固定在安装包中，请读取运营配置接口", "PACKAGED_THEME_REQUIRED")
 	}
 	if route == "/api/catalog/categories" && r.Method == "GET" {
-		raw, e := a.catalogRaw(r.Context(), v.CMSBase, url.Values{"ac": {"list"}})
+		p, e := requestPlatform(r)
+		if e != nil {
+			return e
+		}
+		raw, e := a.cachedCatalog(context.WithValue(r.Context(), cachePlatformKey{}, p), v.CMSBase, url.Values{"ac": {"list"}})
 		if e != nil {
 			return e
 		}
@@ -533,7 +554,11 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if route == "/api/catalog" && r.Method == "GET" {
-		out, e := a.catalog(r.Context(), v.CMSBase, r.URL.Query())
+		p, e := requestPlatform(r)
+		if e != nil {
+			return e
+		}
+		out, e := a.catalog(context.WithValue(r.Context(), cachePlatformKey{}, p), v.CMSBase, r.URL.Query())
 		if e != nil {
 			return e
 		}

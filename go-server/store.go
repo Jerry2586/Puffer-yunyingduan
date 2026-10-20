@@ -35,16 +35,17 @@ type credential struct {
 	Algorithm string `json:"algorithm"`
 }
 type state struct {
-	AppReleases           []appRelease       `json:"appReleases,omitempty"`
-	ManagedReleaseTargets map[string]bool    `json:"managedReleaseTargets,omitempty"`
-	ServiceRouting        M                  `json:"serviceRouting,omitempty"`
-	CMSLocalRoot          string             `json:"cmsLocalRoot,omitempty"`
-	CMSBase               string             `json:"cmsBase"`
-	UpdatedAt             string             `json:"updatedAt"`
-	Setup                 M                  `json:"setup"`
-	Operations            map[string]*record `json:"operations"`
-	Credential            credential         `json:"admin"`
-	Revision              int64              `json:"revision"`
+	Advertising           map[string]*adAccount `json:"advertising,omitempty"`
+	AppReleases           []appRelease          `json:"appReleases,omitempty"`
+	ManagedReleaseTargets map[string]bool       `json:"managedReleaseTargets,omitempty"`
+	ServiceRouting        M                     `json:"serviceRouting,omitempty"`
+	CMSLocalRoot          string                `json:"cmsLocalRoot,omitempty"`
+	CMSBase               string                `json:"cmsBase"`
+	UpdatedAt             string                `json:"updatedAt"`
+	Setup                 M                     `json:"setup"`
+	Operations            map[string]*record    `json:"operations"`
+	Credential            credential            `json:"admin"`
+	Revision              int64                 `json:"revision"`
 }
 
 // All state changes use a durable store and compare-and-swap revision. One service process per instance.

@@ -389,6 +389,11 @@ func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error)
 	if page > 10000 {
 		page = 10000
 	}
+	if strings.TrimSpace(q.Get("keyword")) != "" && len(ids) == 0 {
+		if result, ok := a.indexedCatalog(ctx, base, q, page); ok {
+			return result, nil
+		}
+	}
 	raw, e := a.cachedCatalog(ctx, base, url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}})
 	if e != nil {
 		return nil, e

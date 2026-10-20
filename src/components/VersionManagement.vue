@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue';
 import {releasesApi,type AppRelease,type AppReleaseList} from '@/services/api';
-const targets=[{platform:'mobile',os:'android',label:'安卓手机',short:'Android'},{platform:'mobile',os:'ios',label:'苹果手机',short:'iPhone'},{platform:'tablet',os:'android',label:'安卓平板',short:'Android Pad'},{platform:'tablet',os:'ios',label:'苹果平板',short:'iPad'},{platform:'tv',os:'android',label:'电视 TV',short:'Android TV'},{platform:'web',os:'windows',label:'Windows',short:'Windows'},{platform:'web',os:'web',label:'网页端',short:'Web'}];
+import type {Platform} from '@/domain/types';
+const props=defineProps<{platform?:Platform}>();
+const allTargets=[{platform:'mobile',os:'android',label:'安卓手机',short:'Android'},{platform:'mobile',os:'ios',label:'苹果手机',short:'iPhone'},{platform:'tablet',os:'android',label:'安卓平板',short:'Android Pad'},{platform:'tablet',os:'ios',label:'苹果平板',short:'iPad'},{platform:'tv',os:'android',label:'电视 TV',short:'Android TV'},{platform:'web',os:'windows',label:'Windows',short:'Windows'},{platform:'web',os:'web',label:'网页端',short:'Web'}];
 const items=ref<AppRelease[]>([]),currentIds=ref<string[]>([]),loading=ref(false),saving=ref(false),error=ref(''),message=ref(''),filter=ref(0),keyword=ref(''),page=ref(1);
-const filterNames=['全部平台',...targets.map(t=>t.label)];
-const filtered=computed(()=>items.value.filter(r=>(filter.value===0||(r.platform===targets[filter.value-1].platform&&r.os===targets[filter.value-1].os))&&r.version.includes(keyword.value.trim())));
+const targets=computed(()=>allTargets.filter(t=>!props.platform||t.platform===props.platform));
+const scopedItems=computed(()=>items.value.filter(r=>!props.platform||r.platform===props.platform));
+const filterNames=computed(()=>[props.platform?'全部系统':'全部平台',...targets.value.map(t=>t.label)]);
+const filtered=computed(()=>scopedItems.value.filter(r=>(filter.value===0||(r.platform===targets.value[filter.value-1].platform&&r.os===targets.value[filter.value-1].os))&&r.version.includes(keyword.value.trim())));
 const pages=computed(()=>Math.max(1,Math.ceil(filtered.value.length/10)));
 const rows=computed(()=>filtered.value.slice((page.value-1)*10,page.value*10));
 const modal=ref<'edit'|'delete'|''>(''),selected=ref<AppRelease|null>(null),target=ref(0),parts=ref(['1','0','0']),size=ref(''),download=ref(''),browser=ref(''),notes=ref(''),force=ref(false),enabled=ref(true),formError=ref(''),dialogRoot=ref<any>(null);
 let returnFocus:HTMLElement|null=null,alive=true;
 function receive(v:AppReleaseList){items.value=v.items;currentIds.value=v.currentIds;page.value=Math.min(page.value,pages.value);}
 async function load(){if(loading.value||saving.value)return;loading.value=true;error.value='';try{const v=await releasesApi.list();if(alive)receive(v);}catch(e){if(alive)error.value=(e as Error).message;}finally{if(alive)loading.value=false;}}
-function platformName(r:AppRelease){return targets.find(t=>t.platform===r.platform&&t.os===r.os)?.label||r.platform;}
+function platformName(r:AppRelease){return targets.value.find(t=>t.platform===r.platform&&t.os===r.os)?.label||r.platform;}
 function stamp(raw:string){const d=new Date(raw);return isNaN(d.getTime())?'—':d.toLocaleString('zh-CN',{hour12:false});}
 function status(r:AppRelease){return !r.enabled?'已停用':currentIds.value.includes(r.id)?'当前生效':'历史版本';}
 function setForce(e:any){force.value=!!e.detail.value;}
@@ -19,7 +23,7 @@ function setEnabled(e:any){enabled.value=!!e.detail.value;}
 function setFilter(e:any){filter.value=Number(e.detail.value);page.value=1;}
 async function open(row:AppRelease|null=null,kind:'edit'|'delete'='edit'){
  returnFocus=document.activeElement as HTMLElement;selected.value=row;formError.value='';modal.value=kind;
- target.value=row?Math.max(0,targets.findIndex(t=>t.platform===row.platform&&t.os===row.os)):Math.max(0,filter.value-1);
+ target.value=row?Math.max(0,targets.value.findIndex(t=>t.platform===row.platform&&t.os===row.os)):Math.max(0,filter.value-1);
  parts.value=row?row.version.split('.'):['1','0','0'];size.value=row&&row.sizeMB?String(row.sizeMB):'';download.value=row?.downloadUrl||'';browser.value=row?.browserUrl||'';notes.value=row?.notes||'';force.value=row?.force||false;enabled.value=row?.enabled??true;
  await nextTick();const root=dialogRoot.value?.$el||dialogRoot.value;root?.focus();
 }
@@ -30,7 +34,7 @@ async function submit(){
  if(parts.value.some(p=>!/^\d{1,9}$/.test(p))){formError.value='版本号每段需填写0至999999999之间的整数。';return;}
  if(!Number.isFinite(Number(size.value))||Number(size.value)<=0){formError.value='请填写实际安装包大小，必须大于0 MB。';return;}
  saving.value=true;
- try{const t=targets[target.value];const v=await releasesApi.save({id:selected.value?.id,revision:selected.value?.revision,...t,version:parts.value.map(Number).join('.'),sizeMB:Number(size.value),downloadUrl:download.value.trim(),browserUrl:browser.value.trim(),notes:notes.value.trim(),force:force.value,enabled:enabled.value},!selected.value);receive(v);message.value=enabled.value?'版本已保存发布，对应平台的客户端将在下次同步时获取更新。':'版本已保存为停用状态。';saving.value=false;close();}catch(e){formError.value=(e as Error).message;}finally{saving.value=false;}
+ try{const t=targets.value[target.value];const v=await releasesApi.save({id:selected.value?.id,revision:selected.value?.revision,...t,version:parts.value.map(Number).join('.'),sizeMB:Number(size.value),downloadUrl:download.value.trim(),browserUrl:browser.value.trim(),notes:notes.value.trim(),force:force.value,enabled:enabled.value},!selected.value);receive(v);message.value=enabled.value?'版本已保存发布，对应平台的客户端将在下次同步时获取更新。':'版本已保存为停用状态。';saving.value=false;close();}catch(e){formError.value=(e as Error).message;}finally{saving.value=false;}
 }
 async function remove(){if(!selected.value||saving.value)return;saving.value=true;try{receive(await releasesApi.remove(selected.value));message.value='版本记录已删除，客户端将使用此平台剩余的最高已启用版本。';saving.value=false;close();}catch(e){formError.value=(e as Error).message;}finally{saving.value=false;}}
 onMounted(load);onUnmounted(()=>{alive=false;});
@@ -38,12 +42,12 @@ onMounted(load);onUnmounted(()=>{alive=false;});
 
 <template>
 <view class="versions-page">
- <view class="page-heading"><view><text class="eyebrow">APP RELEASES</text><text class="page-title">版本管理</text><text class="muted">管理各端的安装包与更新，客户端自动获取所属平台的最新版本。</text></view><view class="count-pill"><text class="count-dot"/>{{items.length}} 个版本</view></view>
+ <view class="page-heading"><view><text class="eyebrow">APP RELEASES</text><text class="page-title">版本管理</text><text class="muted">管理各端的安装包与更新，客户端自动获取所属平台的最新版本。</text></view><view class="count-pill"><text class="count-dot"/>{{scopedItems.length}} 个版本</view></view>
  <view v-if="error||message" class="feedback" :class="{failure:!!error}" role="status"><text>{{error||message}}</text><button aria-label="关闭消息" @click="error='';message=''">×</button></view>
  <view class="list-toolbar"><view class="filter-group"><picker :range="filterNames" :value="filter" @change="setFilter"><view class="filter-trigger" role="button" aria-label="筛选版本平台"><text>{{filterNames[filter]}}</text><text class="chevron">⌄</text></view></picker><view class="search"><text>⌕</text><input v-model="keyword" aria-label="搜索版本号" placeholder="搜索版本号" @input="page=1"/></view></view><view class="toolbar-actions"><button class="solid" :disabled="loading||saving" @click="open()"><text class="plus">＋</text> 新增版本</button><button :disabled="loading||saving" @click="load"><text>↻</text> {{loading?'加载中…':'刷新'}}</button></view></view>
  <view class="table-card"><view class="table-scroll"><view class="version-table" role="table" aria-label="应用版本列表"><view class="table-row table-head" role="row"><text role="columnheader">平台 / 系统</text><text role="columnheader">版本号</text><text role="columnheader">更新策略</text><text role="columnheader">包大小</text><text role="columnheader">下载地址</text><text role="columnheader">浏览器下载</text><text role="columnheader">更新说明</text><text role="columnheader">创建时间</text><text role="columnheader">操作</text></view>
  <view v-for="r in rows" :key="r.id" class="table-row" role="row"><view role="cell" class="platform-cell"><view class="platform-icon" :class="r.os">{{r.os==='ios'?'i':r.os==='windows'?'⊞':r.platform==='tv'?'▣':'↗'}}</view><view><text class="cell-title">{{platformName(r)}}</text><text class="small muted">{{targets.find(t=>t.platform===r.platform&&t.os===r.os)?.short}}</text></view></view><view role="cell"><text class="version-number">v{{r.version}}</text><text class="release-state" :class="{live:currentIds.includes(r.id),disabled:!r.enabled}">{{status(r)}}</text></view><view role="cell"><text class="strategy" :class="{forced:r.force}">{{r.force?'强制更新':'普通更新'}}</text></view><text role="cell" class="size-value">{{r.sizeMB?`${r.sizeMB} MB`:'待补充'}}</text><view role="cell" class="url-cell"><a :href="r.downloadUrl" target="_blank" rel="noopener noreferrer" :title="r.downloadUrl">{{r.downloadUrl}}</a></view><view role="cell" class="url-cell"><a v-if="r.browserUrl" :href="r.browserUrl" target="_blank" rel="noopener noreferrer" :title="r.browserUrl">{{r.browserUrl}}</a><text v-else class="muted">—</text></view><text role="cell" class="notes-cell" :title="r.notes">{{r.notes||'—'}}</text><text role="cell" class="date-cell">{{stamp(r.createdAt)}}</text><view role="cell" class="row-actions"><button :disabled="saving" @click="open(r)">编辑</button><button class="danger-text" :disabled="saving" @click="open(r,'delete')">删除</button></view></view>
- </view></view><view v-if="!rows.length" class="empty" role="status"><view class="empty-icon">↥</view><text class="empty-title">{{loading?'正在加载版本…':items.length?'没有符合条件的版本':'还没有发布版本'}}</text><text class="muted">{{items.length?'调整平台筛选或搜索条件。':'点击“新增版本”，添加安装包地址和更新说明。'}}</text><button v-if="!items.length&&!loading" class="empty-add" @click="open()">＋ 新增第一个版本</button></view></view>
+ </view></view><view v-if="!rows.length" class="empty" role="status"><view class="empty-icon">↥</view><text class="empty-title">{{loading?'正在加载版本…':scopedItems.length?'没有符合条件的版本':'还没有发布版本'}}</text><text class="muted">{{scopedItems.length?'调整平台筛选或搜索条件。':'点击“新增版本”，添加安装包地址和更新说明。'}}</text><button v-if="!scopedItems.length&&!loading" class="empty-add" @click="open()">＋ 新增第一个版本</button></view></view>
  <view class="list-footer"><text>共 {{filtered.length}} 条 · 每页 10 条</text><view class="pagination"><button aria-label="上一页" :disabled="page<=1||loading" @click="page--">‹</button><text>{{page}} / {{pages}}</text><button aria-label="下一页" :disabled="page>=pages||loading" @click="page++">›</button></view></view>
  <view class="release-tip"><text class="tip-dot"/><text>同一平台按版本号取最高已启用版本；安卓、苹果、平板与 TV 分别管理，保存后立即生效。</text></view>
  <view v-if="modal" class="modal-backdrop" @click.self="close"><view ref="dialogRoot" class="release-dialog" :class="{compact:modal==='delete'}" role="dialog" aria-modal="true" :aria-label="modal==='delete'?'删除版本':selected?'编辑版本':'新增版本'" tabindex="-1" @keydown="keydown">

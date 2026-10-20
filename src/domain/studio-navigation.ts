@@ -8,7 +8,7 @@ export const studioNavigation=[
   {id:'layout',icon:'▦',label:'页面编排',en:'Page composition'},
   {id:'navigation',icon:'☷',label:'导航与分类绑定',en:'Navigation & categories'},
   {id:'features',icon:'◉',label:'功能开关',en:'Feature controls'},
-  {id:'ads',icon:'▣',label:'广告投放',en:'Advertising'},
+  {id:'ads',icon:'▣',label:'广告中心',en:'Advertising'},
   {id:'member',icon:'♔',label:'会员与收费',en:'Membership'},
   {id:'notice',icon:'▤',label:'公告与文案',en:'Announcements'},
   {id:'settings',icon:'⚙',label:'应用与更新',en:'App & updates'},

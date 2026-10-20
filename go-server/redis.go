@@ -103,13 +103,27 @@ func (c *contentCache) probe(ctx context.Context) error {
 	}
 	return deleteErr
 }
+
+type cachePlatformKey struct{}
+
 func (a *app) cachedCatalog(ctx context.Context, base string, params url.Values) (M, error) {
 	c := a.cache
 	if c == nil {
 		return a.catalogRaw(ctx, base, params)
 	}
+	p, _ := ctx.Value(cachePlatformKey{}).(string)
+	if !has(platforms, p) {
+		p = "mobile"
+	}
+	generation, generationErr := c.client.Get(ctx, c.prefix+"generation:"+p).Result()
+	if generationErr == redis.Nil {
+		generation = "0"
+	} else if generationErr != nil {
+		c.errors.Add(1)
+		return a.catalogRaw(ctx, base, params)
+	}
 	sum := sha256.Sum256([]byte(base + "\n" + a.localRootFor(base) + "\n" + params.Encode()))
-	key := c.prefix + "catalog:v1:" + hex.EncodeToString(sum[:])
+	key := c.prefix + "catalog:v2:" + p + ":" + generation + ":" + hex.EncodeToString(sum[:])
 	cached, err := c.client.Get(ctx, key).Bytes()
 	if err == nil {
 		var result M

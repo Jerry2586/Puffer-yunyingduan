@@ -88,3 +88,10 @@ export interface ConnectionTest {ok:boolean;message:string;latencyMs:number;chec
 
 export interface ServiceUpdate {current:string;platform:string;repository:string;phase:string;message:string;checkedAt:string;available:boolean;canInstall:boolean;reason:string;latest:{version:string;url:string;notes:string;publishedAt:string;asset:string;size:number}|null;}
 export const updateApi={status:()=>request<ServiceUpdate>('/api/admin/system/update'),check:()=>request<ServiceUpdate>('/api/admin/system/update/check','POST',{}),install:(version:string)=>request<ServiceUpdate>('/api/admin/system/update/install','POST',{version}),health:()=>request<{status:string;version:string}>('/api/health')};
+
+export type ClientCacheKind='config'|'users'|'catalog';
+export interface CacheKindStatus {entries:number;countComplete:boolean;ttlSeconds:number;}
+export interface SearchIndexStatus {phase:'idle'|'running'|'succeeded'|'failed';message:string;documents:number;indexedDocuments?:number;pages:number;ready:boolean;sourceConfigured:boolean;builtAt:string;expiresAt:string;startedAt:string;finishedAt:string;}
+export interface ClientCacheStatus {platform:Platform;configured:boolean;available:boolean;checkedAt:string;entries:number;countComplete:boolean;ttlSeconds:number;message:string;kinds?:Record<ClientCacheKind,CacheKindStatus>;search:SearchIndexStatus;}
+export interface ClientCacheClear {ok:boolean;platform:Platform;kind:ClientCacheKind;invalidated:boolean;deleted:number;cleanupComplete:boolean;auditRecorded:boolean;clearedAt:string;}
+export const clientCacheApi={status:(platform:Platform)=>request<ClientCacheStatus>('/api/admin/client-cache?platform='+platform),clear:(platform:Platform,kind:ClientCacheKind)=>request<ClientCacheClear>('/api/admin/client-cache/clear?platform='+platform,'POST',{kind}),rebuild:(platform:Platform)=>request<{accepted:boolean;phase:string}>('/api/admin/client-cache/search/rebuild?platform='+platform,'POST',{})};
