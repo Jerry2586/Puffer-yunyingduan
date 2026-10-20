@@ -87,6 +87,49 @@ func TestClientCacheIsolationInvalidationAndAuth(t *testing.T) {
 	}
 }
 
+func TestClientCacheClearAllIsScoped(t *testing.T) {
+	h := newHarness(t, "")
+	redisServer := miniredis.RunT(t)
+	cfg := &redisConfig{Address: redisServer.Addr(), TTLSeconds: 60}
+	if err := cfg.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	h.a.cache = newContentCache(cfg, h.a.config.DataDir)
+	defer h.a.cache.close()
+	load := func() (M, error) { return M{"ok": true}, nil }
+	for _, kind := range []string{"config", "users", "catalog"} {
+		if _, err := h.a.cacheObject(context.Background(), "mobile", kind, "mobile-"+kind, load); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.a.cacheObject(context.Background(), "tv", kind, "tv-"+kind, load); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := h.req("POST", "/api/admin/client-cache/clear?platform=mobile", M{"kind": "all"}, "")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	result := payload(t, w)
+	if result["kind"] != "all" || result["deleted"] != float64(3) || result["cleanupComplete"] != true {
+		t.Fatal(result)
+	}
+	kinds := obj(result["kinds"])
+	for _, kind := range []string{"config", "users", "catalog"} {
+		entry := obj(kinds[kind])
+		if entry["deleted"] != float64(1) || entry["invalidated"] != true {
+			t.Fatalf("%s: %v", kind, entry)
+		}
+	}
+	mobile := payload(t, h.req("GET", "/api/admin/client-cache?platform=mobile", nil, ""))
+	if mobile["entries"] != float64(0) {
+		t.Fatal("all mobile cache entries remain", mobile)
+	}
+	tv := payload(t, h.req("GET", "/api/admin/client-cache?platform=tv", nil, ""))
+	if tv["entries"] != float64(3) {
+		t.Fatal("clear all escaped client scope", tv)
+	}
+}
+
 func TestClientCacheMissingRedisAndFailure(t *testing.T) {
 	h := newHarness(t, "")
 	w := h.req("GET", "/api/admin/client-cache?platform=tablet", nil, "")

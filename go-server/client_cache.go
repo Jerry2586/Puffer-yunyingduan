@@ -74,6 +74,41 @@ func (c *contentCache) kindKeys(ctx context.Context, p, kind, generation string)
 	}
 	return keys, false, nil
 }
+func (a *app) clearClientCacheKind(ctx context.Context, p, kind string) (M, error) {
+	c := a.cache
+	generation := randomToken()
+	previous, err := c.client.GetSet(ctx, c.generationKey(p, kind), generation).Result()
+	if err == redis.Nil {
+		previous = "0"
+		err = nil
+	}
+	if err != nil {
+		return nil, problem(503, "缓存清理未确认，请检查 Redis 后刷新状态并重试")
+	}
+	keys, complete, scanErr := c.kindKeys(ctx, p, kind, previous)
+	deleted := int64(0)
+	cleanupOK := scanErr == nil
+	if cleanupOK {
+		for start := 0; start < len(keys); start += 100 {
+			n, e := c.client.Del(ctx, keys[start:min(start+100, len(keys))]...).Result()
+			deleted += n
+			if e != nil {
+				cleanupOK = false
+				break
+			}
+		}
+	}
+	event, _ := json.Marshal(M{"at": now(), "event": "client.cache.clear", "platform": p, "kind": kind, "generation": generation, "deleted": deleted})
+	f, e := os.OpenFile(filepath.Join(a.config.DataDir, "audit.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	auditOK := e == nil
+	if e == nil {
+		_, e = f.Write(append(event, '\n'))
+		closeErr := f.Close()
+		auditOK = e == nil && closeErr == nil
+	}
+	return M{"kind": kind, "invalidated": true, "deleted": deleted, "cleanupComplete": cleanupOK && complete, "auditRecorded": auditOK}, nil
+}
+
 func (a *app) adminClientCache(w http.ResponseWriter, r *http.Request) error {
 	if r.URL.Query().Get("platform") == "" {
 		return problem(400, "请明确选择客户端")
@@ -104,7 +139,7 @@ func (a *app) adminClientCache(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	kind := str(input["kind"])
-	if !has([]string{"config", "users", "catalog"}, kind) {
+	if !has([]string{"all", "config", "users", "catalog"}, kind) {
 		return problem(400, "不支持的缓存类型")
 	}
 	if a.cache == nil {
@@ -112,37 +147,23 @@ func (a *app) adminClientCache(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
-	c := a.cache
-	generation := randomToken()
-	previous, err := c.client.GetSet(ctx, c.generationKey(p, kind), generation).Result()
-	if err == redis.Nil {
-		previous = "0"
-		err = nil
+	kinds := []string{kind}
+	if kind == "all" {
+		kinds = []string{"config", "users", "catalog"}
 	}
-	if err != nil {
-		return problem(503, "缓存清理未确认，请检查 Redis 后刷新状态并重试")
-	}
-	keys, complete, scanErr := c.kindKeys(ctx, p, kind, previous)
-	deleted := int64(0)
-	cleanupOK := scanErr == nil
-	if cleanupOK {
-		for start := 0; start < len(keys); start += 100 {
-			n, e := c.client.Del(ctx, keys[start:min(start+100, len(keys))]...).Result()
-			deleted += n
-			if e != nil {
-				cleanupOK = false
-				break
-			}
+	results := M{}
+	var deleted int64
+	cleanupComplete, auditRecorded := true, true
+	for _, current := range kinds {
+		result, clearErr := a.clearClientCacheKind(ctx, p, current)
+		if clearErr != nil {
+			return clearErr
 		}
+		results[current] = result
+		deleted += result["deleted"].(int64)
+		cleanupComplete = cleanupComplete && result["cleanupComplete"].(bool)
+		auditRecorded = auditRecorded && result["auditRecorded"].(bool)
 	}
-	event, _ := json.Marshal(M{"at": now(), "event": "client.cache.clear", "platform": p, "kind": kind, "generation": generation, "deleted": deleted})
-	f, e := os.OpenFile(filepath.Join(a.config.DataDir, "audit.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	auditOK := e == nil
-	if e == nil {
-		_, e = f.Write(append(event, '\n'))
-		closeErr := f.Close()
-		auditOK = e == nil && closeErr == nil
-	}
-	jsonResponse(w, 200, M{"ok": true, "platform": p, "kind": kind, "invalidated": true, "deleted": deleted, "cleanupComplete": cleanupOK && complete, "auditRecorded": auditOK, "clearedAt": now()})
+	jsonResponse(w, 200, M{"ok": true, "platform": p, "kind": kind, "invalidated": true, "deleted": deleted, "cleanupComplete": cleanupComplete, "auditRecorded": auditRecorded, "kinds": results, "clearedAt": now()})
 	return nil
 }

@@ -42,7 +42,7 @@
 | ads | GET/PUT | 当前端广告状态与草稿 |
 | ads/publish、ads/diagnose | POST | 发布及诊断当前端广告 |
 | cache | GET | 当前端真实缓存状态 |
-| cache/clear | POST | 清理指定 kind 的当前端缓存 |
+| cache/clear | POST | 清理当前端指定 kind 的缓存；kind=all 时一次清理 config、users、catalog |
 | cache/search/rebuild | POST | 当前端搜索索引重建 |
 
 管理接口仍要求管理员会话，写入仍要求可信来源。保存和发布沿用原有版本并发控制与原子持久化。

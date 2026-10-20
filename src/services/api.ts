@@ -115,10 +115,11 @@ export type ClientCacheKind='config'|'users'|'catalog';
 export interface CacheKindStatus {entries:number;countComplete:boolean;ttlSeconds:number;}
 export interface SearchIndexStatus {phase:'idle'|'running'|'succeeded'|'failed';message:string;documents:number;indexedDocuments?:number;pages:number;ready:boolean;sourceConfigured:boolean;builtAt:string;expiresAt:string;startedAt:string;finishedAt:string;}
 export interface ClientCacheStatus {platform:Platform;configured:boolean;available:boolean;checkedAt:string;entries:number;countComplete:boolean;ttlSeconds:number;message:string;kinds?:Record<ClientCacheKind,CacheKindStatus>;search:SearchIndexStatus;}
-export interface ClientCacheClear {ok:boolean;platform:Platform;kind:ClientCacheKind;invalidated:boolean;deleted:number;cleanupComplete:boolean;auditRecorded:boolean;clearedAt:string;}
+export interface ClientCacheClear {ok:boolean;platform:Platform;kind:ClientCacheKind|'all';invalidated:boolean;deleted:number;cleanupComplete:boolean;auditRecorded:boolean;clearedAt:string;kinds?:Partial<Record<ClientCacheKind,ClientCacheClear>>;}
 export const clientCacheApi={
  status:(platform:Platform)=>adminClientRequest<ClientCacheStatus>(platform,'cache'),
  clear:(platform:Platform,kind:ClientCacheKind)=>adminClientRequest<ClientCacheClear>(platform,'cache/clear','POST',{kind}),
+ clearAll:(platform:Platform)=>adminClientRequest<ClientCacheClear>(platform,'cache/clear','POST',{kind:'all'}),
  rebuild:(platform:Platform)=>adminClientRequest<{accepted:boolean;phase:string}>(platform,'cache/search/rebuild','POST',{})
 };
 
