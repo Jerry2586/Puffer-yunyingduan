@@ -458,7 +458,8 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			}
 			report := a.checkCMS(r.Context(), str(input["base"]))
 			if str(input["base"]) != "" && report["ok"] != true {
-				return problem(400, str(report["message"]))
+				jsonResponse(w, 400, M{"error": report["message"], "cmsStatus": report})
+				return nil
 			}
 			e = a.change(r.Context(), "cms.changed", func(next *state) error { next.CMSBase = str(report["base"]); return nil })
 			if e != nil {

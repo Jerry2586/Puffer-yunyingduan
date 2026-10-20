@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -126,8 +127,15 @@ func cmsFetch(ctx context.Context, client *http.Client, u *url.URL, method strin
 		return nil, problem(400, "CMS 响应过大")
 	}
 	var v M
-	if e = json.Unmarshal(b, &v); e != nil {
-		return nil, problem(400, "CMS 未返回兼容 JSON")
+	if e = json.Unmarshal([]byte(strings.TrimPrefix(string(b), "\ufeff")), &v); e != nil {
+		text := strings.TrimSpace(strings.TrimPrefix(string(b), "\ufeff"))
+		if strings.EqualFold(text, "closed") {
+			return nil, problem(400, "苹果 CMS 返回 closed：请在苹果 CMS 后台开启视频采集接口，并检查接口访问限制后重试")
+		}
+		if strings.HasPrefix(text, "<") {
+			return nil, problem(400, "CMS 返回网页而非 JSON（HTTP 200）；请检查接口地址、站点拦截或登录验证")
+		}
+		return nil, problem(400, fmt.Sprintf("CMS 未返回兼容 JSON（HTTP 200，响应类型 %s）；请检查采集接口设置", res.Header.Get("Content-Type")))
 	}
 	return v, nil
 }
@@ -140,11 +148,15 @@ func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M
 	if e != nil {
 		return nil, e
 	}
-	if _, ok := v["list"].([]any); !ok {
-		return nil, problem(400, "CMS 缺少 list 数组")
+	key := "list"
+	if params.Get("ac") == "list" {
+		key = "class"
+	}
+	if _, ok := v[key].([]any); !ok {
+		return nil, problem(400, fmt.Sprintf("CMS 缺少 %s 数组", key))
 	}
 	if c, ok := v["code"]; ok && numericOr(c, 0) != 1 {
-		return nil, problem(400, "CMS 返回失败状态")
+		return nil, problem(400, "CMS 返回失败状态："+clean(v["msg"]))
 	}
 	return v, nil
 }
@@ -161,56 +173,77 @@ func (a *app) checkCMS(ctx context.Context, base string) M {
 		return report
 	}
 	report["base"] = u.String()
-	checks := []any{}
+	checks := make([]any, 2)
+	var wg sync.WaitGroup
+	for index, kind := range []string{"categories", "catalog"} {
+		wg.Add(1)
+		go func(index int, kind string) {
+			defer wg.Done()
+			start := time.Now()
+			params := url.Values{"ac": {"list"}}
+			label := "分类接口"
+			if kind == "catalog" {
+				params = url.Values{"ac": {"detail"}, "pg": {"1"}}
+				label = "影片接口"
+			}
+			v, e := a.catalogRaw(ctx, u.String(), params)
+			c := M{"id": kind, "label": label, "ok": e == nil, "latencyMs": time.Since(start).Milliseconds()}
+			target := *u
+			target.RawQuery = params.Encode()
+			c["url"] = target.String()
+			if e == nil {
+				key := "list"
+				if kind == "categories" {
+					key = "class"
+				}
+				xs, ok := v[key].([]any)
+				if !ok {
+					e = fmt.Errorf("CMS 缺少 %s 数组", key)
+				} else {
+					for _, raw := range xs {
+						m := obj(raw)
+						if kind == "categories" && (m["type_id"] == nil || m["type_name"] == nil) {
+							e = fmt.Errorf("分类结构无效")
+						}
+						if kind == "catalog" && (m["vod_id"] == nil || m["vod_name"] == nil) {
+							e = fmt.Errorf("影片结构无效")
+						}
+					}
+					c["count"] = len(xs)
+					if kind == "catalog" {
+						c["total"] = v["total"]
+					}
+				}
+			}
+			if e != nil {
+				c["ok"] = false
+				c["error"] = e.Error()
+			}
+			checks[index] = c
+		}(index, kind)
+	}
+	wg.Wait()
 	ready, empty := true, false
-	for _, kind := range []string{"categories", "catalog"} {
-		start := time.Now()
-		params := url.Values{"ac": {"list"}}
-		label := "分类接口"
-		if kind == "catalog" {
-			params = url.Values{"ac": {"detail"}, "pg": {"1"}}
-			label = "影片接口"
-		}
-		v, e := a.catalogRaw(ctx, u.String(), params)
-		c := M{"id": kind, "label": label, "ok": e == nil, "latencyMs": time.Since(start).Milliseconds()}
-		if e == nil {
-			key := "list"
-			if kind == "categories" {
-				key = "class"
-			}
-			xs, ok := v[key].([]any)
-			if !ok {
-				e = fmt.Errorf("CMS 缺少 %s 数组", key)
-			} else {
-				for _, raw := range xs {
-					m := obj(raw)
-					if kind == "categories" && (m["type_id"] == nil || m["type_name"] == nil) {
-						e = fmt.Errorf("分类结构无效")
-					}
-					if kind == "catalog" && (m["vod_id"] == nil || m["vod_name"] == nil) {
-						e = fmt.Errorf("影片结构无效")
-					}
-				}
-				c["count"] = len(xs)
-				if len(xs) == 0 {
-					empty = true
-				}
-				if kind == "catalog" {
-					c["total"] = v["total"]
-				}
-			}
-		}
-		if e != nil {
+	for _, raw := range checks {
+		c := obj(raw)
+		if c["ok"] != true {
 			ready = false
-			c["ok"] = false
-			c["error"] = e.Error()
 		}
-		checks = append(checks, c)
+		if c["ok"] == true && c["count"] == 0 {
+			empty = true
+		}
 	}
 	report["checks"] = checks
 	report["ok"] = ready
 	report["status"] = "error"
-	report["message"] = "内容接口检测未通过"
+	failures := []string{}
+	for _, raw := range checks {
+		c := obj(raw)
+		if c["ok"] != true {
+			failures = append(failures, str(c["label"])+"："+str(c["error"]))
+		}
+	}
+	report["message"] = strings.Join(failures, "；")
 	if ready {
 		report["status"] = "ready"
 		report["message"] = "分类与影片接口检测通过"

@@ -11,7 +11,7 @@ const time=computed(()=>props.report?.checkedAt?new Date(props.report.checkedAt)
     <text v-if="report?.base" class="cms-report-address">{{report.base}}</text>
     <text class="cms-report-message">{{report?.message||'填写苹果 CMS 站点地址后检测连接。'}}</text>
     <view v-for="check in report?.checks||[]" :key="check.id" class="cms-check-row">
-      <view><text class="cms-check-name">{{check.label}}</text><text class="cms-check-value" v-if="check.ok">{{check.id==='categories'?check.count+' 个分类':(check.total===null?'总数未返回':check.total+' 部影片')+' · 首批 '+check.count+' 部'}}</text><text class="cms-check-error" v-else>{{check.error}}</text></view>
+      <view><text class="cms-check-name">{{check.label}}</text><text v-if="check.url" selectable class="cms-report-address">{{check.url}}</text><text class="cms-check-value" v-if="check.ok">{{check.id==='categories'?check.count+' 个分类':(check.total===null?'总数未返回':check.total+' 部影片')+' · 首批 '+check.count+' 部'}}</text><text class="cms-check-error" v-else>{{check.error}}</text></view>
       <text class="cms-check-result">{{check.ok?'通过':'失败'}} · {{check.latencyMs}} ms</text>
     </view>
     <text v-if="report" class="cms-check-time">最近检测：{{time}} · 耗时 {{report.latencyMs}} ms</text>

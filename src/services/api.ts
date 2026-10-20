@@ -1,7 +1,7 @@
 import defaults from '@/domain/default-theme.json';
 import {normalizeTheme} from '@/domain/normalize-theme';
 import type {Theme,StudioState,Catalog,Category,Platform} from '@/domain/types';
-export interface CmsCheck {id:'categories'|'catalog';label:string;ok:boolean;latencyMs:number;count?:number;total?:number|null;error?:string;}
+export interface CmsCheck {url?:string;id:'categories'|'catalog';label:string;ok:boolean;latencyMs:number;count?:number;total?:number|null;error?:string;}
 export interface CmsStatus {base:string;configured:boolean;ok:boolean;status:'unconfigured'|'ready'|'empty'|'error';checkedAt:string;latencyMs:number;checks:CmsCheck[];message:string;}
 export interface SetupStatus {installed:boolean;completedAt:string;cmsConfigured:boolean;publicOrigin:string;localPreview:boolean;username:string;}
 export interface CmsDiscovery {connected?:boolean;connectedBase?:string;candidates:{id:string;root:string;name:string;base:string;adapterInstalled:boolean;report:CmsStatus|null}[];warnings:string[];recommendedId:string;multiple:boolean;checkedAt:string;}
@@ -14,7 +14,7 @@ export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?
   if(!base) return Promise.reject(new Error('应用未配置服务地址，请联系运营方更新安装包。'));
   // #endif
   return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':clientPlatform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:25000,
-    success:response => { const payload=response.data as any; if(response.statusCode>=200 && response.statusCode<300) resolve(payload); else reject(Object.assign(new Error(payload?.error || '服务连接失败：'+response.statusCode),{status:response.statusCode,code:payload?.code})); },
+    success:response => { const payload=response.data as any; if(response.statusCode>=200 && response.statusCode<300) resolve(payload); else reject(Object.assign(new Error(payload?.error || '服务连接失败：'+response.statusCode),{status:response.statusCode,code:payload?.code,cmsStatus:payload?.cmsStatus})); },
     fail:() => reject(new Error('无法连接河豚服务，请检查服务地址和网络。'))}));
 }
 export const api={
