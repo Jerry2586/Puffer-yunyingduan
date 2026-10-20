@@ -13,7 +13,7 @@ export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?
   // #ifdef APP-PLUS
   if(!base) return Promise.reject(new Error('应用未配置服务地址，请联系运营方更新安装包。'));
   // #endif
-  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':clientPlatform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:25000,
+  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':clientPlatform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:['/api/health','/api/admin/setup'].includes(endpoint)||endpoint.startsWith('/api/admin/state?')?10000:25000,
     success:response => { const payload=response.data as any; if(response.statusCode>=200 && response.statusCode<300) resolve(payload); else reject(Object.assign(new Error(payload?.error || '服务连接失败：'+response.statusCode),{status:response.statusCode,code:payload?.code,cmsStatus:payload?.cmsStatus})); },
     fail:() => reject(new Error('无法连接河豚服务，请检查服务地址和网络。'))}));
 }

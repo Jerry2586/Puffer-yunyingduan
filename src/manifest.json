@@ -2,8 +2,8 @@
   "name": "河豚",
   "appid": "",
   "description": "",
-  "versionName": "0.3.1",
-  "versionCode": "301",
+  "versionName": "0.3.6",
+  "versionCode": "306",
   "transformPx": false,
   "app-plus": {
     "usingComponents": true,

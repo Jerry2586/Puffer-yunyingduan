@@ -111,7 +111,7 @@ func run() error {
 			}
 			defer installer.Close()
 			logStartup(*listen, "", installer.adminPath(), true)
-			return serve(*listen, installer)
+			return serveWithUpdates(*listen, installer, installer.updater.restart)
 		}
 		return e
 	}

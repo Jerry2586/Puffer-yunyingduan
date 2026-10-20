@@ -3,3 +3,4 @@ import '../go/integration.test.mjs';
 import './contract.test.mjs';
 
 import './installer-page.test.mjs';
+import './session-flow.test.mjs';

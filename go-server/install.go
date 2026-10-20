@@ -41,6 +41,7 @@ type installer struct {
 	mu                                                 sync.RWMutex
 	configPath, dataDir, listen, route, installationID string
 	active                                             *app
+	updater                                            *systemUpdater
 	connect                                            func(string) (store, error)
 	probe                                              func(context.Context, string) error
 }
@@ -73,8 +74,16 @@ func newInstaller(configPath, listen string) (*installer, error) {
 	if _, e = hex.DecodeString(token); e != nil {
 		return nil, fmt.Errorf("安装入口文件格式错误")
 	}
+	executable, e := os.Executable()
+	if e != nil {
+		return nil, e
+	}
+	executable, e = filepath.EvalSymlinks(executable)
+	if e != nil {
+		return nil, e
+	}
 	digest := sha256.Sum256([]byte(token))
-	return &installer{configPath: absolute, dataDir: dir, listen: listen, route: "/install/" + token, installationID: hex.EncodeToString(digest[:]), connect: func(dsn string) (store, error) { return openMySQL(dsn) }, probe: probeMySQL}, nil
+	return &installer{configPath: absolute, dataDir: dir, listen: listen, route: "/install/" + token, installationID: hex.EncodeToString(digest[:]), updater: newSystemUpdater(executable, absolute), connect: func(dsn string) (store, error) { return openMySQL(dsn) }, probe: probeMySQL}, nil
 }
 func (i *installer) adminPath() string { return "/" + strings.TrimPrefix(i.route, "/install/")[:6] }
 func probeMySQL(ctx context.Context, dsn string) error {
@@ -279,6 +288,7 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.configPath = i.configPath
+	a.updater = i.updater
 	keep = true
 	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	i.active = a

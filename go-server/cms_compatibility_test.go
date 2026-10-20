@@ -60,3 +60,18 @@ func TestCMSExplainsInvalidResponseAndDoesNotSave(t *testing.T) {
 		})
 	}
 }
+
+func TestUnconfiguredCMSContentIsExplicit(t *testing.T) {
+	h := newHarness(t, "")
+	for _, route := range []string{"/api/catalog/categories", "/api/catalog?page=1"} {
+		w := h.req("GET", route, nil, "")
+		result := payload(t, w)
+		if w.Code != 409 || result["code"] != "CMS_NOT_CONFIGURED" {
+			t.Fatalf("%s: %d %s", route, w.Code, w.Body.String())
+		}
+	}
+	w := h.req("GET", "/api/service-directory", nil, "")
+	if w.Code != 200 {
+		t.Fatalf("directory must remain available: %d %s", w.Code, w.Body.String())
+	}
+}

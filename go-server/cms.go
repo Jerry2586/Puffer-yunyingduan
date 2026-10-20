@@ -140,6 +140,9 @@ func cmsFetch(ctx context.Context, client *http.Client, u *url.URL, method strin
 	return v, nil
 }
 func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M, error) {
+	if strings.TrimSpace(base) == "" {
+		return nil, coded(409, "运营端尚未连接苹果 CMS，请先在后台内容源与连接中配置并测试内容源", "CMS_NOT_CONFIGURED")
+	}
 	u, e := cmsEndpoint(base)
 	if e != nil {
 		return nil, e

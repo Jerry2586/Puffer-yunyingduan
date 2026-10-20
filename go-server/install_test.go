@@ -89,6 +89,35 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	if w = installRequest(i, "POST", i.route+"/complete", v, v.PublicOrigin); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
+	// The first installed session must expose updates without a process restart.
+	if i.active.updater == nil || i.active.updater != i.updater || i.active.updater.configPath != i.configPath {
+		t.Fatal("installer did not hand off its updater and restart channel")
+	}
+	login := httptest.NewRequest("POST", v.PublicOrigin+"/api/admin/login", strings.NewReader(`{"username":"owner","password":"1"}`))
+	login.Header.Set("Origin", v.PublicOrigin)
+	login.Header.Set("X-Hetun-Client", "studio")
+	loginResponse := httptest.NewRecorder()
+	i.ServeHTTP(loginResponse, login)
+	if loginResponse.Code != 200 || len(loginResponse.Result().Cookies()) == 0 {
+		t.Fatal("first-session login failed", loginResponse.Code)
+	}
+	fixture, _, _ := fixtureUpdater(t)
+	i.updater.client = fixture.client
+	for _, endpoint := range []struct{ method, path string }{{"GET", "/api/admin/system/update"}, {"POST", "/api/admin/system/update/check"}} {
+		req := httptest.NewRequest(endpoint.method, v.PublicOrigin+endpoint.path, strings.NewReader("{}"))
+		req.Header.Set("Origin", v.PublicOrigin)
+		req.Header.Set("X-Hetun-Client", "studio")
+		req.AddCookie(loginResponse.Result().Cookies()[0])
+		response := httptest.NewRecorder()
+		i.ServeHTTP(response, req)
+		var view updateView
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &view) != nil || view.Current != buildVersion {
+			t.Fatal("first-session update API unavailable", endpoint.path, response.Code, response.Body.String())
+		}
+		if endpoint.method == "POST" && (view.Latest == nil || view.Latest.Version != "99.0.0") {
+			t.Fatal("first-session release check failed", response.Body.String())
+		}
+	}
 	loaded, e := loadConfig(file)
 	if e != nil || loaded.Storage != "mysql" || loaded.PublicOrigin != v.PublicOrigin || loaded.AdminPath != i.adminPath() {
 		t.Fatal(e)
