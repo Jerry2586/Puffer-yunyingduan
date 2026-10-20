@@ -222,9 +222,47 @@ func deleteAppRelease(v *state, in M) error {
 	}
 	return problem(404, "版本记录不存在")
 }
+func scopedReleaseList(v state, p string) M {
+	if p != "" {
+		rows := []appRelease{}
+		for _, row := range v.AppReleases {
+			if row.Platform == p {
+				rows = append(rows, row)
+			}
+		}
+		v.AppReleases = rows
+	}
+	return releaseList(v)
+}
+func scopeReleaseInput(v state, input M, p string, create bool) error {
+	if p == "" {
+		return nil
+	}
+	if raw, exists := input["platform"]; exists {
+		value, ok := raw.(string)
+		candidate, err := platform(value)
+		if !ok || value == "" || err != nil || candidate != p {
+			return problem(400, "版本平台与客户端路径不一致")
+		}
+	}
+	input["platform"] = p
+	if !create {
+		for _, row := range v.AppReleases {
+			if row.ID == str(input["id"]) {
+				if row.Platform != p {
+					return problem(404, "此客户端中不存在该版本")
+				}
+				return nil
+			}
+		}
+		return problem(404, "版本记录不存在")
+	}
+	return nil
+}
 func (a *app) adminReleases(w http.ResponseWriter, r *http.Request) error {
+	p := clientScope(r)
 	if r.URL.Path == "/api/admin/releases" && r.Method == "GET" {
-		jsonResponse(w, 200, releaseList(a.readState()))
+		jsonResponse(w, 200, scopedReleaseList(a.readState(), p))
 		return nil
 	}
 	deleting := r.URL.Path == "/api/admin/releases/delete" && r.Method == "POST"
@@ -240,6 +278,9 @@ func (a *app) adminReleases(w http.ResponseWriter, r *http.Request) error {
 		action = "deleted"
 	}
 	e = a.change(r.Context(), fmt.Sprintf("releases.%s", action), func(next *state) error {
+		if err := scopeReleaseInput(*next, input, p, !deleting && r.Method == "POST"); err != nil {
+			return err
+		}
 		if deleting {
 			return deleteAppRelease(next, input)
 		}
@@ -248,10 +289,9 @@ func (a *app) adminReleases(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	jsonResponse(w, 200, releaseList(a.readState()))
+	jsonResponse(w, 200, scopedReleaseList(a.readState(), p))
 	return nil
 }
-
 func touchReleasePlatform(v *state, p string) {
 	if r := v.Operations[p]; r != nil {
 		r.PublishedVersion++

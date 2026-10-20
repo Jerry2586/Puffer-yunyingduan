@@ -8,52 +8,70 @@ export interface CmsDiscovery {connected?:boolean;connectedBase?:string;currentR
 const key='hetun-service-base';let clientPlatform:Platform='mobile';export function setClientPlatform(platform:Platform){clientPlatform=platform;}
 export function getServiceBase():string {return String(import.meta.env.VITE_HETUN_SERVICE_BASE || '').replace(/\/$/,'');}
 export function setServiceBase(value:string) { if(value && !/^https?:\/\/[^\s]+$/i.test(value)) throw new Error('请输入完整的服务地址。'); uni.setStorageSync(key,value.replace(/\/$/,'')); }
-export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?:Record<string,unknown>):Promise<T> {
+export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?:Record<string,unknown>,platform:Platform=clientPlatform):Promise<T> {
   let base=getServiceBase();
   // #ifdef APP-PLUS
   if(!base) return Promise.reject(new Error('应用未配置服务地址，请联系运营方更新安装包。'));
   // #endif
-  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':clientPlatform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:['/api/health','/api/admin/setup'].includes(endpoint)||endpoint.startsWith('/api/admin/state?')?10000:25000,
+  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':platform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:['/api/health','/api/admin/setup'].includes(endpoint)||endpoint.startsWith('/api/admin/state?')||/^\/api\/admin\/clients\/(mobile|tablet|tv|desktop)\/state$/.test(endpoint)?10000:25000,
     success:response => { const payload=response.data as any; if(response.statusCode>=200 && response.statusCode<300) resolve(payload); else reject(Object.assign(new Error(payload?.error || '服务连接失败：'+response.statusCode),{status:response.statusCode,code:payload?.code,cmsStatus:payload?.cmsStatus})); },
     fail:() => reject(new Error('无法连接河豚服务，请检查服务地址和网络。'))}));
+}
+// Resolve the client before dispatch: switching tabs cannot change an in-flight request.
+export function clientPath(platform:Platform,endpoint:string,admin=false):string {
+ const client=platform==='web'?'desktop':platform;
+ return (admin?'/api/admin/clients/':'/api/v1/')+client+'/'+endpoint;
+}
+export function clientRequest<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?:Record<string,unknown>,platform:Platform=clientPlatform):Promise<T> {
+ return request<T>(clientPath(platform,endpoint),method,data,platform);
+}
+export function adminClientRequest<T>(platform:Platform,endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?:Record<string,unknown>):Promise<T> {
+ return request<T>(clientPath(platform,endpoint,true),method,data,platform);
+}
+function templatePlatform(template:string):Platform {
+ const p=template.replace(/^runtime-/,'')||clientPlatform;
+ if(p==='desktop')return 'web';
+ if(!['mobile','tablet','tv','web'].includes(p))throw new Error('客户端标识无效。');
+ return p as Platform;
 }
 export const api={
   exportTheme:(template:string)=>request<{name:string;data:string}>('/api/admin/export?template='+encodeURIComponent(template)),
   health:()=>request<{status:string;version:string;cmsConfigured:boolean}>('/api/health'),
   theme:async(platform:Platform='mobile'):Promise<{theme:Theme;version:number;template:string}>=>{
-    setClientPlatform(platform);try{const runtime=await request<{config:Partial<Theme>;version:number}>('/api/runtime?platform='+platform);return {theme:normalizeTheme({...defaults,...runtime.config,carousel:{...defaults.carousel,...runtime.config.carousel}} as Theme),version:runtime.version,template:'bundled-client'};}
-    catch(e){if((e as any).status!==404)throw e;return request('/api/theme?platform='+platform);}
+    setClientPlatform(platform);
+    const runtime=await clientRequest<{config:Partial<Theme>;version:number}>('bootstrap','GET',undefined,platform);
+    return {theme:normalizeTheme({...defaults,...runtime.config,carousel:{...defaults.carousel,...runtime.config.carousel}} as Theme),version:runtime.version,template:'bundled-client'};
   },
   setup:()=>request<SetupStatus>('/api/admin/setup'),
   discoverCms:()=>request<CmsDiscovery>('/api/admin/setup/discover','POST',{}),
   setupCheck:(base:string)=>request<CmsStatus>('/api/admin/setup/check','POST',{base}),
   completeSetup:(username:string,password:string,base:string)=>request<SetupStatus>('/api/admin/setup/complete','POST',{username,password,base}),
   account:(currentPassword:string,username:string,password:string)=>request('/api/admin/account','PUT',{currentPassword,username,password}),
-  catalog:(page=1,keyword='',category='',ids='',orderBy='latest')=>request<Catalog>('/api/catalog?page='+page+'&keyword='+encodeURIComponent(keyword)+'&category='+encodeURIComponent(category)+'&ids='+encodeURIComponent(ids)+'&orderBy='+encodeURIComponent(orderBy)),
-  categories:()=>request<{items:Category[]}>('/api/catalog/categories'),
+  catalog:(page=1,keyword='',category='',ids='',orderBy='latest')=>clientRequest<Catalog>('catalog?page='+page+'&keyword='+encodeURIComponent(keyword)+'&category='+encodeURIComponent(category)+'&ids='+encodeURIComponent(ids)+'&orderBy='+encodeURIComponent(orderBy)),
+  categories:()=>clientRequest<{items:Category[]}>('catalog/categories'),
   login:(username:string,password:string)=>request('/api/admin/login','POST',{username,password}),
-  logout:()=>request('/api/admin/logout','POST',{}),state:(template='')=>request<StudioState>('/api/admin/state?template='+encodeURIComponent(template)),
-  save:(theme:Theme,version:number,template='')=>request<StudioState>('/api/admin/draft','PUT',{theme,version,template}),
-  publish:(version:number,template='')=>request<StudioState>('/api/admin/publish','POST',{version,template}),
-  rollback:(version:number,targetVersion:number,template='')=>request<StudioState>('/api/admin/rollback','POST',{version,targetVersion,template}),
+  logout:()=>request('/api/admin/logout','POST',{}),state:(template='')=>adminClientRequest<StudioState>(templatePlatform(template),'state'),
+  save:(theme:Theme,version:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'draft','PUT',{theme,version}),
+  publish:(version:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'publish','POST',{version}),
+  rollback:(version:number,targetVersion:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'rollback','POST',{version,targetVersion}),
   install:(name:string,data:string)=>request<StudioState>('/api/admin/install','POST',{name,data}),
   renameTemplate:(template:string,name:string,version:number)=>request<StudioState>('/api/admin/template/rename','PUT',{template,name,version}),
   removeTemplate:(template:string,version:number,unpublish:boolean)=>request<StudioState>('/api/admin/template/remove','POST',{template,version,unpublish}),
   asset:(name:string,data:string)=>request<{url:string}>('/api/admin/asset','POST',{name,data}),
-  playback:(id:string,sid:number,nid:number)=>request<{url:string;name:string}>('/api/playback','POST',{id,sid,nid}),
+  playback:(id:string,sid:number,nid:number)=>clientRequest<{url:string;name:string}>('playback','POST',{id,sid,nid}),
   cmsStatus:()=>request<CmsStatus>('/api/admin/cms/status'),
   checkCms:(base:string)=>request<CmsStatus>('/api/admin/cms/check','POST',{base}),
   cms:(base:string,siteId?:string)=>request<StudioState & {cmsStatus:CmsStatus}>('/api/admin/cms','PUT',{base,siteId})
 };
 
 export const memberApi={
- checkout:(orderId:number,code:string,payment:string,platform:string)=>request<any>('/api/member/checkout','POST',{orderId,code,payment,platform}),
- config:()=>request<any>('/api/member/config'),plans:()=>request<any>('/api/member/plans'),profile:()=>request<any>('/api/member/profile'),
- login:async(username:string,password:string,register=false,password2='')=>{const v=await request<any>('/api/member/'+(register?'register':'login'),'POST',{username,password,password2});uni.setStorageSync('hetun-member-token',v.token);return v;},
- logout:async()=>{await request('/api/member/logout','POST',{});uni.removeStorageSync('hetun-member-token');},
- orders:()=>request<any>('/api/member/orders'),order:(code:string)=>request<any>('/api/member/order?code='+encodeURIComponent(code)),
- purchase:(groupId:number,period:string,platform:string)=>request<any>('/api/member/purchase','POST',{groupId,period,platform}),
- upgrade:(groupId:number,period:string)=>request<any>('/api/member/upgrade','POST',{groupId,period}),recharge:(price:number,platform:string)=>request<any>('/api/member/recharge','POST',{price,platform})
+ checkout:(orderId:number,code:string,payment:string,platform:string)=>clientRequest<any>('member/checkout','POST',{orderId,code,payment,platform}),
+ config:()=>clientRequest<any>('member/config'),plans:()=>clientRequest<any>('member/plans'),profile:()=>clientRequest<any>('member/profile'),
+ login:async(username:string,password:string,register=false,password2='')=>{const v=await clientRequest<any>('member/'+(register?'register':'login'),'POST',{username,password,password2});uni.setStorageSync('hetun-member-token',v.token);return v;},
+ logout:async()=>{await clientRequest('member/logout','POST',{});uni.removeStorageSync('hetun-member-token');},
+ orders:()=>clientRequest<any>('member/orders'),order:(code:string)=>clientRequest<any>('member/order?code='+encodeURIComponent(code)),
+ purchase:(groupId:number,period:string,platform:string)=>clientRequest<any>('member/purchase','POST',{groupId,period,platform}),
+ upgrade:(groupId:number,period:string)=>clientRequest<any>('member/upgrade','POST',{groupId,period}),recharge:(price:number,platform:string)=>clientRequest<any>('member/recharge','POST',{price,platform})
 };
 export function assetUrl(value:string){return value?.startsWith('/api/assets/')?getServiceBase()+value:value;}
 export async function chooseLocalFile(accept:string):Promise<{name:string;data:string}>{
@@ -76,7 +94,11 @@ export interface HttpOverview {active:number;total:number;failed:number;averageM
 
 export interface AppRelease {id:string;platform:string;os:string;version:string;sizeMB:number;downloadUrl:string;browserUrl:string;notes:string;force:boolean;enabled:boolean;createdAt:string;updatedAt:string;revision:number;legacy?:boolean;}
 export interface AppReleaseList {items:AppRelease[];currentIds:string[];total:number;}
-export const releasesApi={list:()=>request<AppReleaseList>('/api/admin/releases'),save:(row:Partial<AppRelease>,create:boolean)=>request<AppReleaseList>('/api/admin/releases',create?'POST':'PUT',{...row}),remove:(row:AppRelease)=>request<AppReleaseList>('/api/admin/releases/delete','POST',{id:row.id,revision:row.revision})};
+export const releasesApi={
+ list:(p:Platform=clientPlatform)=>adminClientRequest<AppReleaseList>(p,'releases'),
+ save:(row:Partial<AppRelease>,create:boolean)=>adminClientRequest<AppReleaseList>(templatePlatform(row.platform||''),'releases',create?'POST':'PUT',{...row}),
+ remove:(row:AppRelease)=>adminClientRequest<AppReleaseList>(templatePlatform(row.platform),'releases/delete','POST',{id:row.id,revision:row.revision})
+};
 
 export interface DatabaseSettings {connectSeconds:number;readSeconds:number;writeSeconds:number;maxOpen:number;maxIdle:number;lifetimeSeconds:number;idleSeconds:number;}
 export interface HttpSettings {timeoutSeconds:number;maxIdle:number;maxIdlePerHost:number;maxPerHost:number;idleSeconds:number;}
@@ -94,4 +116,15 @@ export interface CacheKindStatus {entries:number;countComplete:boolean;ttlSecond
 export interface SearchIndexStatus {phase:'idle'|'running'|'succeeded'|'failed';message:string;documents:number;indexedDocuments?:number;pages:number;ready:boolean;sourceConfigured:boolean;builtAt:string;expiresAt:string;startedAt:string;finishedAt:string;}
 export interface ClientCacheStatus {platform:Platform;configured:boolean;available:boolean;checkedAt:string;entries:number;countComplete:boolean;ttlSeconds:number;message:string;kinds?:Record<ClientCacheKind,CacheKindStatus>;search:SearchIndexStatus;}
 export interface ClientCacheClear {ok:boolean;platform:Platform;kind:ClientCacheKind;invalidated:boolean;deleted:number;cleanupComplete:boolean;auditRecorded:boolean;clearedAt:string;}
-export const clientCacheApi={status:(platform:Platform)=>request<ClientCacheStatus>('/api/admin/client-cache?platform='+platform),clear:(platform:Platform,kind:ClientCacheKind)=>request<ClientCacheClear>('/api/admin/client-cache/clear?platform='+platform,'POST',{kind}),rebuild:(platform:Platform)=>request<{accepted:boolean;phase:string}>('/api/admin/client-cache/search/rebuild?platform='+platform,'POST',{})};
+export const clientCacheApi={
+ status:(platform:Platform)=>adminClientRequest<ClientCacheStatus>(platform,'cache'),
+ clear:(platform:Platform,kind:ClientCacheKind)=>adminClientRequest<ClientCacheClear>(platform,'cache/clear','POST',{kind}),
+ rebuild:(platform:Platform)=>adminClientRequest<{accepted:boolean;phase:string}>(platform,'cache/search/rebuild','POST',{})
+};
+
+export interface ClientStatisticsReport {
+ platform:Platform;client:string;checkedAt:string;startedAt:string;scope:'process';
+ requests:{total:number;failed:number;successful:number;averageMs:number;endpoints:{endpoint:string;total:number;failed:number;averageMs:number}[]};
+ business:{publishedVersion:number;publishedAt:string;releases:number;advertisingVersion:number;advertising:{requests:number;fills:number;impressions:number;clicks:number;completes:number;errors:number;rewards:number;points:number}};
+}
+export const clientStatisticsApi={get:(platform:Platform)=>adminClientRequest<ClientStatisticsReport>(platform,'statistics')};

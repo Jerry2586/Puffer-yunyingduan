@@ -90,6 +90,7 @@ type app struct {
 	configPath    string
 	startedAt     time.Time
 	requests      requestMonitor
+	clientMetrics clientTelemetry
 	outbound      outboundMonitor
 }
 
@@ -237,6 +238,12 @@ func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w = a.requests.begin(w)
 		defer a.requests.finish(w.(*monitoredResponse), time.Now())
 	}
+	if p, endpoint := publicMetricScope(r); p != "" {
+		tracked := &monitoredResponse{ResponseWriter: w}
+		w = tracked
+		started := time.Now()
+		defer func() { a.clientMetrics.record(p, endpoint, tracked.status, time.Since(started)) }()
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	defer func() {
@@ -274,6 +281,12 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		w.WriteHeader(204)
 		return nil
 	}
+	var routeErr error
+	r, routeErr = normalizeClientRoute(r)
+	if routeErr != nil {
+		return routeErr
+	}
+	route = r.URL.Path
 	public, _ := url.Parse(a.config.PublicOrigin)
 	if public != nil && strings.HasPrefix(a.config.PublicOrigin, "http://127.0.0.1:") && r.Host != public.Host {
 		return problem(403, "请求主机不匹配")
@@ -451,6 +464,9 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if str(v.Setup["completedAt"]) == "" {
 			return coded(409, "请先完成安装向导", "SETUP_REQUIRED")
 		}
+		if route == "/api/admin/statistics" {
+			return a.clientStatistics(w, r)
+		}
 		if route == "/api/admin/releases" || route == "/api/admin/releases/delete" {
 			return a.adminReleases(w, r)
 		}
@@ -492,6 +508,9 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		case (route == "/api/admin/draft" && r.Method == "PUT") || ((route == "/api/admin/publish" || route == "/api/admin/rollback") && r.Method == "POST"):
 			input, e := readBody(w, r, 256*1024)
 			if e != nil {
+				return e
+			}
+			if e := scopeOperationInput(r, input); e != nil {
 				return e
 			}
 			p, e := platform(str(input["template"]))

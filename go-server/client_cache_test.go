@@ -165,3 +165,38 @@ func TestClientCacheRejectsConflictingPlatformHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestClientCacheStatusTotalsAllKindsAndIsolation(t *testing.T) {
+	h := newHarness(t, "")
+	redisServer := miniredis.RunT(t)
+	cfg := &redisConfig{Address: redisServer.Addr(), TTLSeconds: 60}
+	if err := cfg.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	h.a.cache = newContentCache(cfg, h.a.config.DataDir)
+	defer h.a.cache.close()
+	load := func() (M, error) { return M{"ok": true}, nil }
+	for _, kind := range []string{"config", "users", "catalog"} {
+		if _, err := h.a.cacheObject(context.Background(), "mobile", kind, "mobile-"+kind, load); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := h.a.cacheObject(context.Background(), "tv", "catalog", "tv-catalog", load); err != nil {
+		t.Fatal(err)
+	}
+	status := payload(t, h.req("GET", "/api/admin/client-cache?platform=mobile", nil, ""))
+	if status["available"] != true || status["entries"] != float64(3) || status["countComplete"] != true {
+		t.Fatal(status)
+	}
+	kinds := obj(status["kinds"])
+	for _, kind := range []string{"config", "users", "catalog"} {
+		entry := obj(kinds[kind])
+		if entry["entries"] != float64(1) || entry["countComplete"] != true {
+			t.Fatalf("%s: %v", kind, entry)
+		}
+	}
+	tv := payload(t, h.req("GET", "/api/admin/client-cache?platform=tv", nil, ""))
+	if tv["entries"] != float64(1) {
+		t.Fatal("platform cache count crossed scope", tv)
+	}
+}

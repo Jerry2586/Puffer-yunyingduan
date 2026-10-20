@@ -83,3 +83,7 @@ POST /api/admin/client-cache/search/rebuild?platform=... 为所选端异步重�
 
 ## 广告中心（R043）
 广告中心采用独立 hetun-advertising-v1 合同，不复用主题草稿发布。主题中心负责骨架和视觉，运营中心负责广告内容、投放条件、发布及回传，原生客户端负责SDK初始化与展示。四端状态隔离，管理员接口认证，持久化使用版本CAS。客户端事件只计统计；激励由签名回调原子记账。详细接口与容量、原生集成边界见 docs/advertising-api.md。
+
+## 四端明确入口（R045）
+
+四端共用一个 Go 服务和业务实现。公开接口统一为 /api/v1/{mobile|tablet|tv|desktop}/...，管理员接口统一为 /api/admin/clients/{mobile|tablet|tv|desktop}/...。desktop 映射原内部 web 平台；旧接口作为兼容别名继续进入原处理函数。CMS、会员身份及系统配置共享；运营配置、广告、应用版本与缓存按端隔离。路由、查询和平台头冲突直接拒绝，应用版本修改和删除在持久化锁内校验归属。接口明细及真实能力边界见 docs/client-api.md。

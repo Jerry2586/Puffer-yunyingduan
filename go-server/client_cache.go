@@ -22,17 +22,9 @@ func (c *contentCache) clientCacheStatus(ctx context.Context, p string) (M, erro
 		out["message"] = "Redis 无法连接，请检查服务配置"
 		return out, nil
 	}
-	generation, err := c.client.Get(ctx, c.prefix+"generation:"+p).Result()
-	if err == redis.Nil {
-		generation = "0"
-	} else if err != nil {
-		return nil, problem(503, "无法读取缓存状态")
-	}
-	keys, complete, err := c.cacheKeys(ctx, p, generation)
-	if err != nil {
-		return nil, problem(503, "无法读取缓存条目，请检查 Redis 权限和连接")
-	}
 	kinds := M{}
+	total := 0
+	complete := true
 	for _, kind := range []string{"config", "users", "catalog"} {
 		gen, e := c.generation(ctx, p, kind)
 		if e != nil {
@@ -42,11 +34,13 @@ func (c *contentCache) clientCacheStatus(ctx context.Context, p string) (M, erro
 		if e != nil {
 			return nil, problem(503, "无法读取缓存条目")
 		}
+		total += len(rows)
+		complete = complete && all
 		kinds[kind] = M{"entries": len(rows), "countComplete": all, "ttlSeconds": c.kindTTL(kind)}
 	}
 	out["kinds"] = kinds
 	out["available"] = true
-	out["entries"] = len(keys)
+	out["entries"] = total
 	out["countComplete"] = complete
 	out["ttlSeconds"] = c.cfg.TTLSeconds
 	out["message"] = "当前客户端缓存可用"

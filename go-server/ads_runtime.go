@@ -226,7 +226,7 @@ func (a *app) publicAds(w http.ResponseWriter, r *http.Request) error {
 	}
 	if r.URL.Path == "/api/ads/config" && r.Method == "GET" {
 		acc := readAds(a.readState(), p)
-		jsonResponse(w, 200, M{"contract": adContract, "platform": p, "version": acc.PublishedVersion, "slots": acc.Published.Slots, "decisionUrl": "/api/ads/decision?platform=" + p, "eventUrl": "/api/ads/events?platform=" + p, "rewardBalanceUrl": "/api/ads/balance?platform=" + p})
+		jsonResponse(w, 200, M{"contract": adContract, "platform": p, "version": acc.PublishedVersion, "slots": acc.Published.Slots, "decisionUrl": publicAdURL(r, p, "decision"), "eventUrl": publicAdURL(r, p, "events"), "rewardBalanceUrl": publicAdURL(r, p, "balance")})
 		return nil
 	}
 	if r.URL.Path == "/api/ads/balance" && r.Method == "GET" {

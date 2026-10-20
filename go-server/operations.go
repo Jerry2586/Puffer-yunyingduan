@@ -62,20 +62,33 @@ func platform(s string) (string, error) {
 	return s, nil
 }
 func requestPlatform(r *http.Request) (string, error) {
-	q, h := r.URL.Query().Get("platform"), r.Header.Get("X-Hetun-Platform")
-	p, e := platform(q)
-	if e != nil {
-		return "", e
+	p := clientScope(r)
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return "", problem(400, "查询参数格式无效")
 	}
-	if h != "" {
-		hp, e := platform(h)
-		if e != nil {
-			return "", e
+	query := values["platform"]
+	headers := r.Header.Values("X-Hetun-Platform")
+	if len(query) > 1 || len(headers) > 1 {
+		return "", problem(400, "客户端标识不能重复")
+	}
+	for _, source := range [][]string{query, headers} {
+		for _, value := range source {
+			if value == "" {
+				return "", problem(400, "客户端标识不能为空")
+			}
+			candidate, err := platform(value)
+			if err != nil {
+				return "", err
+			}
+			if p != "" && candidate != p {
+				return "", problem(400, "客户端路径、参数与平台标识不一致")
+			}
+			p = candidate
 		}
-		if q != "" && p != hp {
-			return "", problem(400, "平台参数与平台标识不一致")
-		}
-		p = hp
+	}
+	if p == "" {
+		p = "mobile"
 	}
 	return p, nil
 }

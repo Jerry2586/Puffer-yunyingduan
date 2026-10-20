@@ -14,7 +14,7 @@ const rows=computed(()=>filtered.value.slice((page.value-1)*10,page.value*10));
 const modal=ref<'edit'|'delete'|''>(''),selected=ref<AppRelease|null>(null),target=ref(0),parts=ref(['1','0','0']),size=ref(''),download=ref(''),browser=ref(''),notes=ref(''),force=ref(false),enabled=ref(true),formError=ref(''),dialogRoot=ref<any>(null);
 let returnFocus:HTMLElement|null=null,alive=true;
 function receive(v:AppReleaseList){items.value=v.items;currentIds.value=v.currentIds;page.value=Math.min(page.value,pages.value);}
-async function load(){if(loading.value||saving.value)return;loading.value=true;error.value='';try{const v=await releasesApi.list();if(alive)receive(v);}catch(e){if(alive)error.value=(e as Error).message;}finally{if(alive)loading.value=false;}}
+async function load(){if(loading.value||saving.value)return;loading.value=true;error.value='';try{const v=await releasesApi.list(props.platform);if(alive)receive(v);}catch(e){if(alive)error.value=(e as Error).message;}finally{if(alive)loading.value=false;}}
 function platformName(r:AppRelease){return targets.value.find(t=>t.platform===r.platform&&t.os===r.os)?.label||r.platform;}
 function stamp(raw:string){const d=new Date(raw);return isNaN(d.getTime())?'—':d.toLocaleString('zh-CN',{hour12:false});}
 function status(r:AppRelease){return !r.enabled?'已停用':currentIds.value.includes(r.id)?'当前生效':'历史版本';}

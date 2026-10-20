@@ -114,9 +114,7 @@ func adPlatform(r *http.Request) (string, error) {
 	}
 	return requestPlatform(r)
 }
-func adOS(p, os string) bool {
-	return (p == "mobile" || p == "tablet") && has([]string{"android", "ios"}, os) || p == "tv" && os == "android" || p == "web" && has([]string{"windows", "web"}, os)
-}
+func adOS(p, os string) bool { return releaseTarget(p, os) }
 func validateAdConfig(c adConfig, p string) error {
 	if len(c.Slots) != len(adSlots) || len(c.Creatives) > 100 || len(c.Channels) > 20 {
 		return problem(400, "需要8个固定广告位；每端最多100个广告、20个渠道")
