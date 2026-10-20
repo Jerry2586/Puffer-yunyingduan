@@ -27,14 +27,15 @@ import (
 var installHTML string
 
 type installInput struct {
-	PublicOrigin  string `json:"publicOrigin"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Database      string `json:"database"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	Admin         string `json:"admin"`
-	AdminPassword string `json:"adminPassword"`
+	Redis         *redisConfig `json:"redis"`
+	PublicOrigin  string       `json:"publicOrigin"`
+	Host          string       `json:"host"`
+	Port          int          `json:"port"`
+	Database      string       `json:"database"`
+	Username      string       `json:"username"`
+	Password      string       `json:"password"`
+	Admin         string       `json:"admin"`
+	AdminPassword string       `json:"adminPassword"`
 }
 type installer struct {
 	mu                                                 sync.RWMutex
@@ -124,11 +125,15 @@ func (i *installer) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.active != nil {
+		i.active.cache.close()
 		return i.active.store.Close()
 	}
 	return nil
 }
 func (i *installer) configuration(v installInput) (config, error) {
+	if v.Redis == nil {
+		return config{}, fmt.Errorf("请在第一步配置 Redis 地址和认证信息")
+	}
 	if v.Host == "" || len(v.Host) > 253 || strings.ContainsAny(v.Host, "/\\ \t\r\n") || v.Port < 1 || v.Port > 65535 || v.Database == "" || v.Username == "" {
 		return config{}, fmt.Errorf("请填写有效数据库地址、端口、库名与用户名")
 	}
@@ -142,7 +147,7 @@ func (i *installer) configuration(v installInput) (config, error) {
 	db.Timeout = 5 * time.Second
 	db.ReadTimeout = 10 * time.Second
 	db.WriteTimeout = 10 * time.Second
-	return validateConfig(config{AdminPath: i.adminPath(), Listen: i.listen, PublicOrigin: strings.TrimSpace(v.PublicOrigin), DataDir: i.dataDir, Storage: "mysql", MySQLDSN: db.FormatDSN(), ClientOrigins: []string{}})
+	return validateConfig(config{AdminPath: i.adminPath(), Listen: i.listen, PublicOrigin: strings.TrimSpace(v.PublicOrigin), DataDir: i.dataDir, Storage: "mysql", Redis: v.Redis, MySQLDSN: db.FormatDSN(), ClientOrigins: []string{}})
 }
 func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	i.mu.RLock()
@@ -212,12 +217,18 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	cache := newContentCache(c.Redis, i.dataDir)
+	defer cache.close()
+	if e = cache.probe(ctx); e != nil {
+		jsonResponse(w, 400, M{"error": "Redis 连接或读写校验失败，请检查服务是否启动、地址端口、密码及读写权限", "code": "redis_check_failed", "stage": "redis"})
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, "/test") {
 		if e = i.probe(ctx, c.MySQLDSN); e != nil {
 			jsonResponse(w, 400, installationDatabaseError("connect", e))
 			return
 		}
-		jsonResponse(w, 200, M{"ok": true, "message": "数据库连接成功；完成安装时将检查建表和写入权限"})
+		jsonResponse(w, 200, M{"ok": true, "message": "MySQL 连接、Redis 连接及读写校验通过；完成安装时将检查建表和写入权限"})
 		return
 	}
 	cred, e := credentials(v.Admin, v.AdminPassword)
@@ -263,12 +274,15 @@ func (i *installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.MarshalIndent(c, "", "  ")
 	if e = atomicFile(i.configPath, b); e != nil {
+		a.cache.close()
 		jsonResponse(w, 500, M{"error": "配置文件保存失败，请检查程序目录写入权限，然后使用相同账号重试"})
 		return
 	}
+	a.configPath = i.configPath
 	keep = true
 	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	i.active = a
+	go a.autoConnectCMS()
 	_ = os.Remove(filepath.Join(i.dataDir, "install-token.txt"))
 	jsonResponse(w, 200, M{"ok": true, "redirect": i.adminPath() + "#/pages/studio/index"})
 }

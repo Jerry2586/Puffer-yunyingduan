@@ -47,6 +47,10 @@ func forbiddenIP(ip net.IP) bool {
 func cmsClient(allowPrivate bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 32
+	transport.MaxConnsPerHost = 64
+	transport.IdleConnTimeout = 60 * time.Second
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, e := net.SplitHostPort(address)
 		if e != nil {
@@ -146,7 +150,7 @@ func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M
 }
 func (a *app) checkCMS(ctx context.Context, base string) M {
 	begin := time.Now()
-	report := M{"base": "", "configured": strings.TrimSpace(base) != "", "ok": false, "status": "unconfigured", "checkedAt": now(), "checks": []any{}, "message": "尚未配置苹果 CMS"}
+	report := M{"base": "", "configured": strings.TrimSpace(base) != "", "ok": false, "status": "unconfigured", "checkedAt": now(), "checks": []any{}, "latencyMs": int64(0), "message": "尚未配置苹果 CMS"}
 	if strings.TrimSpace(base) == "" {
 		return report
 	}
@@ -315,7 +319,7 @@ func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error)
 	if page > 10000 {
 		page = 10000
 	}
-	raw, e := a.catalogRaw(ctx, base, url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}})
+	raw, e := a.cachedCatalog(ctx, base, url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}})
 	if e != nil {
 		return nil, e
 	}

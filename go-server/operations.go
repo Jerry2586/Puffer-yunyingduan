@@ -422,7 +422,9 @@ func bootstrap(v state, p, os, version, origin string) (M, error) {
 		return nil, problem(400, "客户端版本必须为三段数字")
 	}
 	r := v.Operations[p]
-	settings := obj(r.Published["clientSettings"])
+	config := clone(r.Published)
+	settings := obj(config["clientSettings"])
+	applyAppRelease(v, p, os, settings)
 	download := ""
 	if os == "android" {
 		download = str(settings["androidUrl"])
@@ -430,11 +432,14 @@ func bootstrap(v state, p, os, version, origin string) (M, error) {
 	if os == "ios" {
 		download = str(settings["iosUrl"])
 	}
+	if os == "windows" || os == "web" {
+		download = str(settings["downloadUrl"])
+	}
 	if !strings.HasPrefix(strings.ToLower(download), "https://") {
 		download = ""
 	}
 	available := download != "" && newer(str(settings["latestVersion"]), version)
-	return M{"schemaVersion": 1, "contract": contract, "themeContract": "hetun-runtime-v1", "platform": p, "os": os, "version": r.PublishedVersion, "publishedAt": r.PublishedAt, "config": r.Published, "serviceBase": origin, "pollSeconds": 15, "cmsConfigured": v.CMSBase != "", "update": M{"available": available, "required": available && settings["forceUpdate"] == true, "version": settings["latestVersion"], "notes": settings["updateNotes"], "url": download}}, nil
+	return M{"schemaVersion": 1, "contract": contract, "themeContract": "hetun-runtime-v1", "platform": p, "os": os, "version": r.PublishedVersion, "publishedAt": r.PublishedAt, "config": config, "serviceBase": origin, "pollSeconds": 15, "cmsConfigured": v.CMSBase != "", "update": M{"available": available, "required": available && settings["forceUpdate"] == true, "version": settings["latestVersion"], "notes": settings["updateNotes"], "url": download, "browserUrl": settings["browserUrl"], "sizeMB": settings["sizeMB"], "releaseId": settings["releaseId"]}}, nil
 }
 func validateState(v state) error {
 	for _, p := range platforms {

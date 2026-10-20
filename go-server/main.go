@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var buildVersion = "0.3.4"
+var buildVersion = "0.3.5"
 var errNoState = sql.ErrNoRows
 
 func loadConfig(name string) (config, error) {
@@ -37,6 +37,16 @@ func loadConfig(name string) (config, error) {
 	return validateConfig(c)
 }
 func validateConfig(c config) (config, error) {
+	if c.Database != nil {
+		if e := c.Database.validate(); e != nil {
+			return c, e
+		}
+	}
+	if c.HTTP != nil {
+		if e := c.HTTP.validate(); e != nil {
+			return c, e
+		}
+	}
 	if _, _, e := net.SplitHostPort(c.Listen); e != nil {
 		return c, fmt.Errorf("listen 必须是 host:port")
 	}
@@ -67,6 +77,11 @@ func validateConfig(c config) (config, error) {
 		v, e := url.Parse(origin)
 		if e != nil || v.Scheme != "https" || v.Host == "" || v.User != nil || v.Path != "" || v.RawQuery != "" || v.Fragment != "" {
 			return c, fmt.Errorf("clientOrigins 必须是 HTTPS 来源")
+		}
+	}
+	if c.Redis != nil {
+		if e := c.Redis.normalize(); e != nil {
+			return c, e
 		}
 	}
 	return c, nil
@@ -109,7 +124,7 @@ func run() error {
 	}
 	var s store
 	if c.Storage == "mysql" {
-		s, e = openMySQL(c.MySQLDSN)
+		s, e = openMySQL(c.MySQLDSN, c.Database)
 	} else {
 		s = &fileStore{filepath.Join(c.DataDir, "state.json")}
 	}
@@ -159,6 +174,7 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	defer a.cache.close()
 	if *backup != "" {
 		if !filepath.IsAbs(*backup) {
 			return fmt.Errorf("备份文件必须为绝对路径")
@@ -184,8 +200,18 @@ func run() error {
 		}
 		a.config = c
 	}
+	a.configPath, e = filepath.Abs(*configPath)
+	if e != nil {
+		return e
+	}
+	executable, e := filepath.EvalSymlinks(exe)
+	if e != nil {
+		return e
+	}
+	a.updater = newSystemUpdater(executable, a.configPath)
 	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
-	return serve(c.Listen, a)
+	go a.autoConnectCMS()
+	return serveWithUpdates(c.Listen, a, a.updater.restart)
 }
 
 // Keep persisted legacy entries valid while using a shorter canonical address.
@@ -213,30 +239,51 @@ func logStartup(listen, origin, adminPath string, installing bool) {
 	}
 	log.Print("========================================")
 }
-func serve(listen string, handler http.Handler) error {
+func serve(listen string, handler http.Handler) error { return serveWithUpdates(listen, handler, nil) }
+func serveWithUpdates(listen string, handler http.Handler, updates <-chan *preparedUpdate) error {
 	server := &http.Server{Addr: listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
-	stopped := make(chan os.Signal, 1)
-	signal.Notify(stopped, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stopped)
-	go func() {
-		<-stopped
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(ctx)
-	}()
 	listener, e := net.Listen("tcp", listen)
 	if e != nil {
 		return e
 	}
+	stopped := make(chan os.Signal, 1)
+	signal.Notify(stopped, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stopped)
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
 	log.Print("启动成功")
-	e = server.Serve(listener)
-	if errors.Is(e, http.ErrServerClosed) {
-		return nil
+	var update *preparedUpdate
+	select {
+	case <-stopped:
+	case update = <-updates:
+	case e = <-served:
+		if errors.Is(e, http.ErrServerClosed) {
+			return nil
+		}
+		return e
 	}
-	return e
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if e = server.Shutdown(ctx); e != nil {
+		_ = server.Close()
+		if update != nil {
+			os.Remove(update.candidate)
+		}
+		return fmt.Errorf("关闭服务失败: %w", e)
+	}
+	if update != nil {
+		return update
+	}
+	return nil
 }
 func main() {
 	if e := run(); e != nil {
-		log.Fatal(e)
+		var update *preparedUpdate
+		if errors.As(e, &update) {
+			e = activateUpdate(update)
+		}
+		if e != nil {
+			log.Fatal(e)
+		}
 	}
 }

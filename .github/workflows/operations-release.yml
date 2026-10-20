@@ -1,0 +1,82 @@
+name: Publish operations release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operations-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'Jerry2586/Puffer-yunyingduan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=12
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: isolated-ci-password
+          MYSQL_DATABASE: hetun_test
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pisolated-ci-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      HETUN_TEST_REDIS_ADDR: 127.0.0.1:6379
+      HETUN_TEST_MYSQL_DSN: root:isolated-ci-password@tcp(127.0.0.1:3306)/hetun_test?timeout=5s
+      HETUN_TEST_MYSQL_PASSWORD: isolated-ci-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-server/go.mod
+          cache-dependency-path: go-server/go.sum
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e "if(process.env.RELEASE_TAG!=='v'+require('./package.json').version)throw Error('Release tag must match package.json version')"
+      - name: Install locked dependencies outside source
+        run: |
+          mkdir -p "$RUNNER_TEMP/hetun-ops-dependencies"
+          cp package.json package-lock.json "$RUNNER_TEMP/hetun-ops-dependencies/"
+          npm ci --prefix "$RUNNER_TEMP/hetun-ops-dependencies" --no-audit --no-fund
+      - name: Test and compile all release targets
+        env:
+          HETUN_UNI_DEPS: ${{ runner.temp }}/hetun-ops-dependencies/node_modules
+          HETUN_OPERATIONS_BUILD_ROOT: ${{ runner.temp }}/hetun-ops-release
+        run: node deploy/go/build.mjs
+      - name: Verify compiled application
+        env:
+          HETUN_OPERATIONS_BUILD_INFO: ${{ runner.temp }}/hetun-ops-release/latest-build.json
+        run: node --test deploy/operations/integration.test.mjs
+      - name: Publish verified binaries and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "$RELEASE_TAG" "$RUNNER_TEMP/hetun-ops-release/release/$VERSION/"* --verify-tag --title "河豚运营中心 $RELEASE_TAG" --generate-notes

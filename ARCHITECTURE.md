@@ -15,3 +15,46 @@ CMS列表采用真实采集接口。手选ID保持输入顺序；评分仅排序
 部署代码、状态和配置分离。构建产物、运行数据及凭据在源码目录外。正式发布执行本地及 CI 隔离环境验证；生产CMS、支付、宝塔安装和真机需要对应环境验收。参考站对比说明见REFERENCE-COMPARISON.md。
 
 部署包包括Linux amd64/arm64和Windows本机查看程序。Go内嵌网页，生产无需Node运行时；状态存MySQL，素材和审计在独立dataDir。启动配置没有许可字段。每个安装归档严格只有一个可执行文件。无配置时自动生成持久随机后台入口，日志显示端口和访问地址；同一入口在安装前显示向导，完成后显示登录页。填写 MySQL 与管理员后建表并生成配置，临时安装接口关闭，客户端 /api/ 路径固定。旧配置升级自动补充随机后台入口。高级预配置启动才生成随机首次管理员文件，向导完成后移除该明文文件。安装说明见deploy/go/README.md。
+
+
+## 本机 CMS 发现与服务域名切换
+
+运营端安装完成后和首次启动时，在尚未配置 CMS 的情况下扫描同服务器 /www/wwwroot 下的苹果 CMS 公共站点配置，并实际请求采集分类及影片接口。只发现一个可用站点才自动连接；多个站点由管理员选择。不会创建 CMS、执行 PHP 或读取数据库密码。异机 CMS 仍可手填地址；会员和支付适配需要单独验证。
+
+后台服务域名设置保存一个 HTTPS 主域名和最多四个备用域名；域名、TLS 和服务器反向代理需事先可访问。GET /api/service-directory 返回 payload、signature、publicKey，均为 Base64，RSA-SHA256 签名。payload 的 contract 为 hetun-service-directory-v1，含公钥 SHA256 keyId、独立递增 revision、addresses、recoveryUrls、issuedAt。普通业务发布不会增加地址目录版本。
+
+打包器检测后台时验证目录签名，再将固定公钥、地址和版本写入 runtime.serviceDirectory。新版 Kotlin 底包声明 service-routing-v1，运行时校验目录后再向服务发送登录令牌；旧底包不能带着新目录出包。GET 网络故障可换地址，POST 不自动重发。签名有效不代表证书、DNS 或服务器已部署。
+
+至少保留一个可访问备用域名，或预先配置独立 HTTPS 恢复文件地址，并在每次地址变更后将后台导出的签名目录同步到该地址。所有已知入口同时失联且没有独立恢复入口时，离线客户端无法接收新域名，需更新安装包。换服务器须迁移业务数据以及 dataDir/service-key.pem，保持服务身份。目录公开不含私钥；私钥不能放进 APK。主题中心继续完全离线，不承担域名配置和服务发现。
+
+本次原生客户端实现限 Android；iOS 和 Windows 的原生域名切换与二进制重打包未实现。
+
+## 系统管理与真实运行接口
+
+运营与运维下方提供独立系统管理导航：系统概览、服务配置、内容源与连接、App 接口与域名、日志查看。管理员修改密码和退出位于右上角用户中心。安装完成后登录默认打开系统概览；系统页面占用完整工作区，内容编排继续保留客户端预览。
+
+已认证管理接口 GET /api/admin/system/overview 返回当前 Go 进程版本、运行时间、Go 堆内存、核心数、协程数以及实际存储检查。MySQL 模式执行 PingContext 并返回真实连接池统计；文件模式只报告文件存储读取状态。CPU 使用率未采集；Redis 返回实际 PING、INFO 和连接池统计。概览使用已保存的 CMS 地址实际探测分类和影片接口，总探测超时为 8 秒；未配置、失败、成功分别显示，单纯保存地址不代表连接成功。
+
+GET/PUT /api/admin/system/config 只允许读取脱敏配置和修改监听地址、公开来源、客户端允许来源。保存到实际配置文件并保留数据库连接等其它字段；运行实例保持原值，页面显示是否需要通过进程管理器重启。保存操作记录 system.config.saved 审计事件。
+
+GET /api/admin/system/logs 只读取固定 dataDir/audit.jsonl，最多读取尾部 1MB 并返回最近 500 条记录；支持全部、系统、账号和 CMS 筛选。响应只包含时间、事件和修订号，不返回任意原始字段或密码。进程标准输出仍由宝塔进程管理器查看。内容源、域名目录和账号页面复用现有真实接口；本地界面验收不替代生产 MySQL、真实 CMS 或客户端验收。
+
+概览从 Linux /proc 或 Windows 内存 API 读取系统物理内存和进程驻留内存，与 Go 堆内存分开显示。业务 HTTP 统计在内存中按进程生命周期累计总请求、异常、耗时和并发；排除 OPTIONS 及 /api/admin/system/ 路径，重启归零。Redis 缓存成功的公共影片目录，连接失败时回退内容源；健康探测绕过缓存。CPU 使用率未采集明确说明。
+
+## 独立版本管理与客户端更新
+
+运营端“版本管理”使用全宽列表与新增/编辑弹窗，不展示设备实时预览；“应用文档”保留免责声明、隐私政策和关于内容。管理员接口 GET/POST/PUT /api/admin/releases 与 POST /api/admin/releases/delete 使用现有会话认证、写入来源检查、审计及持久化事务。编辑、删除携带 revision，冲突返回409。
+
+版本按 mobile/android、mobile/ios、tablet/android、tablet/ios、tv/android、web/windows、web/web 隔离。同一目标使用最高已启用数字版本（x.y.z），停用或删除后重新计算；新建记录要求实际包大小、完整HTTPS下载地址、1至500字说明。保存即时生效，递增对应平台 PublishedVersion 以使客户端缓存更新；不依赖内容草稿发布按钮。
+
+/api/client/bootstrap?platform=mobile&os=android&version=1.0.0 返回现有 update 字段，并增加 browserUrl、sizeMB、releaseId；同版本或更高版本不提示更新。现有已发布有效更新配置只迁移一次，删除最后一条版本后不复活旧配置。浏览器下载地址为更新元数据，现有原生客户端未实现的浏览器回退或iOS安装行为不因此自动具备；安装包地址可达性、签名与真机安装仍须独立验收。
+
+## 运营服务面板更新
+
+服务配置的系统更新只读取 Jerry2586/Puffer-yunyingduan 公开仓库 latest 稳定 Release。GET /api/admin/system/update 读取状态，POST /check 获取真实版本，POST /install 只接收已检查版本 version；沿用管理员认证和写入来源校验。它与客户端 App 版本管理独立。
+
+Linux amd64/arm64 下载固定命名 tar.gz，核对 GitHub SHA256 digest（旧发布回退 SHA256SUMS.txt），限制下载及展开体积，只接受单个普通文件 hetun-operations。候选程序执行 --version 和 --check-config，失败不替换当前程序。通过后关闭 HTTP、数据库与 Redis连接，以 .previous 硬链接保留旧程序、原子重命名替换可执行文件，再同PID exec。exec系统调用失败时恢复上一文件；新程序已启动之后的业务异常未实现自动健康回滚，不承诺健康回滚。后台界面轮询健康接口实际版本确认恢复，重启后重新登录。配置、数据库、素材和服务身份密钥不被更新包覆盖；更新前仍需业务备份。
+
+Windows仅检查，未支持运行中exe替换；本地无Linux运行环境时无法声称完成Linux进程实测。Linux专用测试覆盖真实进程更新与配置保留，将在Linux CI执行。更新API固定仓库，不接受用户传入下载地址、命令或任意仓库。
+
+发布流程在 v* tag 触发，tag必须匹配package.json版本，构建与集成测试通过后附三个架构产物及SHA256SUMS.txt创建Release；普通main推送不触发服务器升级。旧部署需先手动装一次含系统更新功能的版本。

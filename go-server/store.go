@@ -35,12 +35,15 @@ type credential struct {
 	Algorithm string `json:"algorithm"`
 }
 type state struct {
-	CMSBase    string             `json:"cmsBase"`
-	UpdatedAt  string             `json:"updatedAt"`
-	Setup      M                  `json:"setup"`
-	Operations map[string]*record `json:"operations"`
-	Credential credential         `json:"admin"`
-	Revision   int64              `json:"revision"`
+	AppReleases           []appRelease       `json:"appReleases,omitempty"`
+	ManagedReleaseTargets map[string]bool    `json:"managedReleaseTargets,omitempty"`
+	ServiceRouting        M                  `json:"serviceRouting,omitempty"`
+	CMSBase               string             `json:"cmsBase"`
+	UpdatedAt             string             `json:"updatedAt"`
+	Setup                 M                  `json:"setup"`
+	Operations            map[string]*record `json:"operations"`
+	Credential            credential         `json:"admin"`
+	Revision              int64              `json:"revision"`
 }
 
 // All state changes use a durable store and compare-and-swap revision. One service process per instance.
@@ -109,13 +112,24 @@ func (s *fileStore) Close() error { return nil }
 
 type mysqlStore struct{ db *sql.DB }
 
-func openMySQL(dsn string) (*mysqlStore, error) {
-	db, e := sql.Open("mysql", dsn)
+func openMySQL(dsn string, options ...*databaseSettings) (*mysqlStore, error) {
+	var option *databaseSettings
+	if len(options) > 0 {
+		option = options[0]
+	}
+	settings := effectiveDatabase(option)
+	if err := settings.validate(); err != nil {
+		return nil, err
+	}
+	prepared, e := databaseDSN(dsn, settings)
 	if e != nil {
 		return nil, e
 	}
-	db.SetMaxOpenConns(5)
-	db.SetConnMaxLifetime(3 * time.Minute)
+	db, e := sql.Open("mysql", prepared)
+	if e != nil {
+		return nil, e
+	}
+	configureDatabase(db, settings)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if e = db.PingContext(ctx); e != nil {

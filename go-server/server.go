@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -35,15 +36,19 @@ func problem(status int, message string) error     { return &apiError{Status: st
 func coded(status int, message, code string) error { return &apiError{status, message, code} }
 
 type config struct {
-	AdminPath       string   `json:"adminPath,omitempty"`
-	Listen          string   `json:"listen"`
-	PublicOrigin    string   `json:"publicOrigin"`
-	DataDir         string   `json:"dataDir"`
-	Storage         string   `json:"storage"`
-	MySQLDSN        string   `json:"mysqlDSN"`
-	AllowPrivateCMS bool     `json:"allowPrivateCMS"`
-	ClientOrigins   []string `json:"clientOrigins"`
-	CMSBase         string   `json:"cmsBase"`
+	Database        *databaseSettings `json:"database,omitempty"`
+	HTTP            *httpSettings     `json:"http,omitempty"`
+	Redis           *redisConfig      `json:"redis,omitempty"`
+	AdminPath       string            `json:"adminPath,omitempty"`
+	Listen          string            `json:"listen"`
+	PublicOrigin    string            `json:"publicOrigin"`
+	DataDir         string            `json:"dataDir"`
+	Storage         string            `json:"storage"`
+	MySQLDSN        string            `json:"mysqlDSN"`
+	AllowPrivateCMS bool              `json:"allowPrivateCMS"`
+	ClientOrigins   []string          `json:"clientOrigins"`
+	CMSBase         string            `json:"cmsBase"`
+	CMSRoots        []string          `json:"cmsRoots,omitempty"`
 }
 type adminSession struct {
 	Until time.Time
@@ -60,18 +65,27 @@ type memberSession struct {
 	Mu    sync.Mutex
 }
 type app struct {
-	mu        sync.RWMutex
-	state     state
-	store     store
-	config    config
-	cms       *http.Client
-	sessions  map[string]adminSession
-	attempts  map[string]attempt
-	members   map[string]*memberSession
-	checkouts map[string]checkout
-	epoch     int
-	assets    string
-	web       http.Handler
+	updater     *systemUpdater
+	mu          sync.RWMutex
+	state       state
+	store       store
+	config      config
+	cache       *contentCache
+	cms         *http.Client
+	sessions    map[string]adminSession
+	attempts    map[string]attempt
+	members     map[string]*memberSession
+	checkouts   map[string]checkout
+	epoch       int
+	assets      string
+	web         http.Handler
+	serviceKey  *rsa.PrivateKey
+	discoveryMu sync.Mutex
+	systemMu    sync.Mutex
+	configPath  string
+	startedAt   time.Time
+	requests    requestMonitor
+	outbound    outboundMonitor
 }
 
 func randomToken() string {
@@ -125,10 +139,11 @@ func newApp(ctx context.Context, c config, s store) (*app, error) {
 	} else if e != nil {
 		return nil, e
 	}
+	migrateAppReleases(&v)
 	if e = validateState(v); e != nil {
 		return nil, e
 	}
-	a := &app{state: v, store: s, config: c, cms: cmsClient(c.AllowPrivateCMS), sessions: map[string]adminSession{}, attempts: map[string]attempt{}, members: map[string]*memberSession{}, checkouts: map[string]checkout{}, assets: filepath.Join(c.DataDir, "assets")}
+	a := &app{startedAt: time.Now(), state: v, store: s, config: c, cms: configuredCMSClient(c), sessions: map[string]adminSession{}, attempts: map[string]attempt{}, members: map[string]*memberSession{}, checkouts: map[string]checkout{}, assets: filepath.Join(c.DataDir, "assets")}
 	if e = os.MkdirAll(a.assets, 0700); e != nil {
 		return nil, e
 	}
@@ -137,6 +152,12 @@ func newApp(ctx context.Context, c config, s store) (*app, error) {
 		return nil, e
 	}
 	a.web = http.FileServer(http.FS(web))
+	if e = a.loadServiceKey(); e != nil {
+		return nil, e
+	}
+	a.outbound.settings = effectiveHTTP(c.HTTP)
+	a.cms.Transport = &trackedTransport{base: a.cms.Transport, metrics: &a.outbound}
+	a.cache = newContentCache(c.Redis, c.DataDir)
 	return a, nil
 }
 func (a *app) readState() state { a.mu.RLock(); defer a.mu.RUnlock(); return clone(a.state) }
@@ -207,6 +228,10 @@ func (a *app) cookie(w http.ResponseWriter, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{Name: "hetun_session", Value: token, Path: "/api", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: strings.HasPrefix(a.config.PublicOrigin, "https://"), MaxAge: maxAge})
 }
 func (a *app) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/api/admin/system/") && r.Method != "OPTIONS" {
+		w = a.requests.begin(w)
+		defer a.requests.finish(w.(*monitoredResponse), time.Now())
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	defer func() {
@@ -231,7 +256,7 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 	}
 	origin := r.Header.Get("Origin")
 	admin := strings.HasPrefix(route, "/api/admin/")
-	allowed := origin == a.config.PublicOrigin
+	allowed := origin == a.config.PublicOrigin || has(a.serviceAddresses(a.readState()), origin)
 	clientAllowed := has(a.config.ClientOrigins, origin)
 	if origin != "" && (allowed || (!admin && clientAllowed)) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -255,6 +280,9 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if !admin && origin != "" && !allowed && !clientAllowed {
 			return problem(403, "请求来源不允许")
 		}
+	}
+	if handled, err := a.handleDirectory(w, r); handled {
+		return err
 	}
 	if route == "/api/health" && r.Method == "GET" {
 		v := a.readState()
@@ -320,16 +348,18 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			jsonResponse(w, 200, M{"ok": true})
 			return nil
 		}
+		if route == "/api/admin/service-addresses/check" {
+			return a.checkServiceAddress(w, r)
+		}
+		if route == "/api/admin/service-addresses" {
+			return a.adminDirectory(w, r)
+		}
 		if route == "/api/admin/setup" && r.Method == "GET" {
 			jsonResponse(w, 200, a.setupStatus(v))
 			return nil
 		}
 		if route == "/api/admin/setup/discover" && r.Method == "POST" {
-			candidates := []any{}
-			if a.config.CMSBase != "" {
-				candidates = append(candidates, M{"id": "configured", "root": "", "name": "配置的 CMS", "base": a.config.CMSBase, "adapterInstalled": false, "report": a.checkCMS(r.Context(), a.config.CMSBase)})
-			}
-			jsonResponse(w, 200, M{"candidates": candidates, "warnings": []string{"请填写真实 CMS 域名并检测；不会读取 PHP 数据库密码。"}, "recommendedId": "", "multiple": false, "checkedAt": now()})
+			jsonResponse(w, 200, a.discoverAndConnect(r.Context()))
 			return nil
 		}
 		if has([]string{"/api/admin/setup/check", "/api/admin/cms/check"}, route) && r.Method == "POST" {
@@ -404,6 +434,12 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if str(v.Setup["completedAt"]) == "" {
 			return coded(409, "请先完成安装向导", "SETUP_REQUIRED")
 		}
+		if route == "/api/admin/releases" || route == "/api/admin/releases/delete" {
+			return a.adminReleases(w, r)
+		}
+		if strings.HasPrefix(route, "/api/admin/system/") {
+			return a.adminSystem(w, r)
+		}
 		switch {
 		case route == "/api/admin/state" && r.Method == "GET":
 			p, e := platform(r.URL.Query().Get("template"))
@@ -469,7 +505,7 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if osName == "" {
 			osName = "android"
 		}
-		out, e := bootstrap(v, p, osName, r.URL.Query().Get("version"), a.config.PublicOrigin)
+		out, e := bootstrap(v, p, osName, r.URL.Query().Get("version"), a.serviceAddresses(v)[0])
 		if e != nil {
 			return e
 		}

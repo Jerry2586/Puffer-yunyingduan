@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/alicebob/miniredis/v2"
 	mysql "github.com/go-sql-driver/mysql"
 	"net"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func TestInstallerLifecycleAndGuards(t *testing.T) {
 	storage := &fileStore{filepath.Join(t.TempDir(), "state.json")}
 	i.connect = func(string) (store, error) { return storage, nil }
 	i.probe = func(context.Context, string) error { return nil }
-	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Password: "db@pass:/?#", Admin: "owner", AdminPassword: "1"}
+	v := installInput{Redis: installerTestRedis(t), PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Password: "db@pass:/?#", Admin: "owner", AdminPassword: "1"}
 	c, e := i.configuration(v)
 	if e != nil {
 		t.Fatal(e)
@@ -137,7 +138,7 @@ func TestInstallerRejectsExistingStateAndConnectionFailures(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer i.Close()
-	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Admin: "owner", AdminPassword: "StrongLocal12345"}
+	v := installInput{Redis: installerTestRedis(t), PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Admin: "owner", AdminPassword: "StrongLocal12345"}
 	i.probe = func(context.Context, string) error { return errors.New("do-not-leak-password") }
 	if w := installRequest(i, "POST", i.route+"/test", v, v.PublicOrigin); w.Code != 400 || strings.Contains(w.Body.String(), "do-not-leak") {
 		t.Fatal(w.Code, w.Body)
@@ -200,7 +201,7 @@ func TestInstallerMySQL(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: host, Port: port, Database: db.DBName, Username: db.User, Password: db.Passwd, Admin: "owner", AdminPassword: "StrongLocal12345"}
+	v := installInput{Redis: installerTestRedis(t), PublicOrigin: "http://127.0.0.1:8787", Host: host, Port: port, Database: db.DBName, Username: db.User, Password: db.Passwd, Admin: "owner", AdminPassword: "StrongLocal12345"}
 	// Validate real server error classification before creating any installation state.
 	for _, tc := range []struct {
 		name, code string
@@ -269,7 +270,7 @@ func TestInstallerDatabaseDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer i.Close()
-	v := installInput{PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Admin: "owner", AdminPassword: "StrongLocal12345"}
+	v := installInput{Redis: installerTestRedis(t), PublicOrigin: "http://127.0.0.1:8787", Host: "127.0.0.1", Port: 3306, Database: "isolated", Username: "owner", Admin: "owner", AdminPassword: "StrongLocal12345"}
 	tests := []struct {
 		name   string
 		err    error
@@ -315,4 +316,10 @@ func TestInstallerDatabaseDiagnostics(t *testing.T) {
 			}
 		})
 	}
+}
+
+func installerTestRedis(t *testing.T) *redisConfig {
+	t.Helper()
+	server := miniredis.RunT(t)
+	return &redisConfig{Address: server.Addr()}
 }
