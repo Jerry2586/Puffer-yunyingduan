@@ -4,7 +4,7 @@ import type {Theme,StudioState,Catalog,Category,Platform} from '@/domain/types';
 export interface CmsCheck {url?:string;id:'categories'|'catalog';label:string;ok:boolean;latencyMs:number;count?:number;total?:number|null;error?:string;}
 export interface CmsStatus {base:string;configured:boolean;ok:boolean;status:'unconfigured'|'ready'|'empty'|'error';checkedAt:string;latencyMs:number;checks:CmsCheck[];message:string;}
 export interface SetupStatus {installed:boolean;completedAt:string;cmsConfigured:boolean;publicOrigin:string;localPreview:boolean;username:string;}
-export interface CmsDiscovery {connected?:boolean;connectedBase?:string;candidates:{id:string;root:string;name:string;base:string;adapterInstalled:boolean;report:CmsStatus|null}[];warnings:string[];recommendedId:string;multiple:boolean;checkedAt:string;}
+export interface CmsDiscovery {connected?:boolean;connectedBase?:string;currentReport?:CmsStatus|null;candidates:{id:string;root:string;name:string;base:string;adapterInstalled:boolean;source?:string;attempts?:{base:string;source:string;report:CmsStatus}[];report:CmsStatus|null}[];warnings:string[];recommendedId:string;multiple:boolean;checkedAt:string;}
 const key='hetun-service-base';let clientPlatform:Platform='mobile';export function setClientPlatform(platform:Platform){clientPlatform=platform;}
 export function getServiceBase():string {return String(import.meta.env.VITE_HETUN_SERVICE_BASE || '').replace(/\/$/,'');}
 export function setServiceBase(value:string) { if(value && !/^https?:\/\/[^\s]+$/i.test(value)) throw new Error('请输入完整的服务地址。'); uni.setStorageSync(key,value.replace(/\/$/,'')); }

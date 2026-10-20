@@ -36,7 +36,7 @@ func TestCMSCategoryWithoutList(t *testing.T) {
 
 func TestCMSExplainsInvalidResponseAndDoesNotSave(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{"closed", "开启视频采集接口"},
+		{"closed", "不能仅凭此响应确定原因"},
 		{"<html>login</html>", "网页而非 JSON"},
 		{"broken", "未返回兼容 JSON"},
 		{"null", "缺少 class 数组"},

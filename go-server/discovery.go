@@ -83,7 +83,17 @@ func scanCMSSites(roots []string) ([]M, []string) {
 				}
 				digest := sha256.Sum256([]byte(real))
 				_, adapterErr := os.Stat(filepath.Join(real, "application", "index", "controller", "Hetun.php"))
-				candidates = append(candidates, M{"id": hex.EncodeToString(digest[:10]), "root": real, "name": name, "base": base, "adapterInstalled": adapterErr == nil, "report": nil})
+				candidate := M{"id": hex.EncodeToString(digest[:10]), "root": real, "name": name, "base": base, "adapterInstalled": adapterErr == nil, "report": nil, "addresses": []M{}}
+				addCMSAddress(candidate, base, "CMS 站点配置")
+				directoryName := filepath.Base(real)
+				if strings.Contains(directoryName, ".") && !strings.ContainsAny(directoryName, " :\\") {
+					address := "https://" + directoryName
+					if installDir := publicCMSMetadata(string(data), "install_dir"); installDir != "" && installDir != "/" {
+						address += "/" + strings.Trim(installDir, "/")
+					}
+					addCMSAddress(candidate, address, "站点目录名称")
+				}
+				candidates = append(candidates, candidate)
 				return
 			}
 		}
@@ -126,6 +136,7 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 		roots = []string{"/www/wwwroot"}
 	}
 	candidates, warnings := scanCMSSites(roots)
+	warnings = append(warnings, addCMSBindings([]string{"/www/server/panel/vhost/nginx"}, candidates)...)
 	v := a.readState()
 	explicit := v.CMSBase
 	if explicit == "" {
@@ -139,7 +150,9 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	}
 	if explicit != "" {
 		if u, e := cmsEndpoint(explicit); e == nil && !seen[u.String()] {
-			candidates = append(candidates, M{"id": "configured-address", "name": "已配置的 CMS", "root": "", "base": u.String(), "adapterInstalled": false, "report": nil})
+			candidate := M{"id": "configured-address", "name": "已配置的 CMS", "root": "", "base": u.String(), "adapterInstalled": false, "report": nil, "addresses": []M{}}
+			addCMSAddress(candidate, u.String(), "当前配置")
+			candidates = append(candidates, candidate)
 		}
 	}
 	slots := make(chan struct{}, 4)
@@ -157,7 +170,7 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 			case <-ctx.Done():
 				return
 			}
-			c["report"] = a.checkCMS(ctx, str(c["base"]))
+			a.probeCMSCandidate(ctx, c)
 		}(c)
 	}
 	wg.Wait()
@@ -167,30 +180,50 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 			usable[str(c["base"])] = c
 		}
 	}
-	recommended, connected := "", false
-	if len(usable) == 1 {
+	recommended := ""
+	currentKey := v.CMSBase
+	if u, err := cmsEndpoint(currentKey); currentKey != "" && err == nil {
+		currentKey = u.String()
+	}
+	currentHealthy := usable[currentKey] != nil
+	if ctx.Err() != nil {
+		warnings = append(warnings, "本次扫描未全部完成，未自动切换内容源；请重新检测或选择已通过的站点。")
+	}
+	if len(usable) == 1 && ctx.Err() == nil {
 		for base, c := range usable {
 			recommended = str(c["id"])
-			if v.CMSBase == "" {
+			if !currentHealthy {
 				err := a.change(parent, "cms.auto-connected", func(next *state) error {
-					if next.CMSBase == "" {
-						next.CMSBase = base
-						next.UpdatedAt = now()
+					if next.CMSBase != v.CMSBase {
+						return problem(409, "连接已被其他操作更新，请重新检测")
 					}
+					next.CMSBase = base
+					next.UpdatedAt = now()
 					return nil
 				})
 				if err != nil {
 					warnings = append(warnings, "探测通过，但保存连接失败："+err.Error())
-				} else {
-					connected = a.readState().CMSBase == base
 				}
 			}
 		}
 	}
+	saved := a.readState().CMSBase
+	savedKey := saved
+	if u, err := cmsEndpoint(savedKey); savedKey != "" && err == nil {
+		savedKey = u.String()
+	}
+	connected := usable[savedKey] != nil
+	var currentReport any
+	for _, c := range candidates {
+		if str(c["base"]) == savedKey {
+			currentReport = c["report"]
+		}
+	}
+
 	if len(candidates) == 0 {
 		warnings = append(warnings, "未在同服务器 /www/wwwroot 下找到苹果 CMS；请先安装 CMS，或将站点目录加入 config.json 的 cmsRoots。")
 	}
-	return M{"candidates": candidates, "warnings": warnings, "recommendedId": recommended, "multiple": len(usable) > 1, "checkedAt": now(), "connected": connected, "connectedBase": a.readState().CMSBase}
+	return M{"candidates": candidates, "warnings": warnings, "recommendedId": recommended, "multiple": len(usable) > 1, "checkedAt": now(), "connected": connected, "connectedBase": saved, "currentReport": currentReport}
 }
 func (a *app) autoConnectCMS() {
 	if a.readState().CMSBase != "" {
@@ -199,4 +232,47 @@ func (a *app) autoConnectCMS() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	a.discoverAndConnect(ctx)
+}
+
+// Each attempted address is a real CMS content check; failed alternatives remain visible.
+func (a *app) probeCMSCandidate(ctx context.Context, candidate M) {
+	attempts := []M{}
+	addresses, _ := candidate["addresses"].([]M)
+	if len(addresses) == 0 {
+		addresses = []M{{"base": candidate["base"], "source": "当前配置"}}
+	}
+	for i, address := range addresses {
+		if i >= 6 || ctx.Err() != nil {
+			break
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		report := a.checkCMS(attemptCtx, str(address["base"]))
+		cancel()
+		attempts = append(attempts, M{"base": address["base"], "source": address["source"], "report": report})
+		candidate["report"] = report
+		candidate["base"] = report["base"]
+		candidate["source"] = address["source"]
+		if report["ok"] == true {
+			break
+		}
+	}
+	candidate["attempts"] = attempts
+	if candidate["report"] == nil {
+		candidate["report"] = M{"base": candidate["base"], "configured": true, "ok": false, "status": "error", "checks": []any{}, "message": "本次探测时间已用完，请重新检测", "checkedAt": now()}
+	}
+}
+func addCMSAddress(candidate M, address, source string) {
+	u, err := cmsEndpoint(address)
+	if err != nil {
+		return
+	}
+	addresses, _ := candidate["addresses"].([]M)
+	for _, item := range addresses {
+		if item["base"] == u.String() {
+			return
+		}
+	}
+	if len(addresses) < 6 {
+		candidate["addresses"] = append(addresses, M{"base": u.String(), "source": source})
+	}
 }

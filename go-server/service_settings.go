@@ -272,7 +272,7 @@ func (a *app) testConnection(w http.ResponseWriter, r *http.Request, c config, s
 	case "http":
 		v := a.readState()
 		if v.CMSBase == "" {
-			return problem(409, "尚未连接苹果CMS，请先在苹果CMS中配置真实地址")
+			return problem(409, "尚未连接苹果 CMS，请先在“内容源与连接”连接真实站点")
 		}
 		client := configuredCMSClient(c)
 		defer client.CloseIdleConnections()

@@ -18,9 +18,13 @@ import (
 )
 
 func cmsEndpoint(base string) (*url.URL, error) {
-	u, e := url.Parse(strings.TrimSpace(base))
+	address := strings.TrimSpace(base)
+	if address != "" && !strings.Contains(address, "://") && !strings.HasPrefix(address, "/") {
+		address = "https://" + address
+	}
+	u, e := url.Parse(address)
 	if e != nil || u.Host == "" || !has([]string{"http", "https"}, u.Scheme) || u.User != nil || u.Fragment != "" {
-		return nil, problem(400, "请输入完整的 HTTP(S) 苹果 CMS 地址")
+		return nil, problem(400, "请输入苹果 CMS 域名或 HTTP(S) 地址")
 	}
 	if !strings.Contains(u.Path, "/api.php/provide/vod") {
 		u.Path = strings.TrimSuffix(u.Path, "/") + "/api.php/provide/vod/"
@@ -130,7 +134,7 @@ func cmsFetch(ctx context.Context, client *http.Client, u *url.URL, method strin
 	if e = json.Unmarshal([]byte(strings.TrimPrefix(string(b), "\ufeff")), &v); e != nil {
 		text := strings.TrimSpace(strings.TrimPrefix(string(b), "\ufeff"))
 		if strings.EqualFold(text, "closed") {
-			return nil, problem(400, "苹果 CMS 返回 closed：请在苹果 CMS 后台开启视频采集接口，并检查接口访问限制后重试")
+			return nil, problem(400, "苹果 CMS 返回 closed，尚未取得内容数据；请核对实际接口路径、采集接口开关及访问限制，不能仅凭此响应确定原因")
 		}
 		if strings.HasPrefix(text, "<") {
 			return nil, problem(400, "CMS 返回网页而非 JSON（HTTP 200）；请检查接口地址、站点拦截或登录验证")
