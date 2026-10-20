@@ -1,6 +1,6 @@
 # 河豚运营中心
 
-独立运营服务端使用 Go，内嵌现有 Vue/uni-app 管理界面。正式版本为 **0.3.7**，沿用后台外观。服务器安装后不需要 Node.js 或 Go 编译器。
+独立运营服务端使用 Go，内嵌现有 Vue/uni-app 管理界面。正式版本为 **0.3.8**，沿用后台外观。服务器安装后不需要 Node.js 或 Go 编译器。
 
 苹果 CMS 提供内容、会员、订单和播放权限；运营端管理手机、平板、电视、网页的内容栏目、轮播、广告、公告、功能开关及更新配置。已删除商业授权、激活页面、云 Key 校验和许可客户端。管理员登录、请求来源检查、会员购买与播放权限继续保留。
 
@@ -8,12 +8,12 @@
 
 ### 1. 下载安装包
 
-打开 [正式版 v0.3.7 下载页面](https://github.com/Jerry2586/Puffer-yunyingduan/releases/tag/v0.3.7)，展开 **Assets**，按服务器架构选择：
+打开 [正式版 v0.3.8 下载页面](https://github.com/Jerry2586/Puffer-yunyingduan/releases/tag/v0.3.8)，展开 **Assets**，按服务器架构选择：
 
 | 服务器 | 下载文件 |
 |---|---|
-| 常见 Intel / AMD（x86_64）Linux 服务器 | `Hetun-Operations-0.3.7-linux-amd64.tar.gz` |
-| ARM64（aarch64）Linux 服务器 | `Hetun-Operations-0.3.7-linux-arm64.tar.gz` |
+| 常见 Intel / AMD（x86_64）Linux 服务器 | `Hetun-Operations-0.3.8-linux-amd64.tar.gz` |
+| ARM64（aarch64）Linux 服务器 | `Hetun-Operations-0.3.8-linux-arm64.tar.gz` |
 
 不要下载 Source code；那是开发源码。安装包解压后只有一个 **hetun-operations** 可执行文件，网页、安装向导和接口都已内置。
 

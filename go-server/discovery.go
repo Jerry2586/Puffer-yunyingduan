@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-// Discovery reads public MacCMS site metadata only, never database settings or PHP execution.
+// Recognition reads public site metadata. The separate local adapter reads
+// static database settings; no PHP is executed.
 func publicCMSMetadata(data string, key string) string {
 	re := regexp.MustCompile(`["']` + regexp.QuoteMeta(key) + `["']\s*=>\s*["']([^"'\r\n]{0,300})["']`)
 	m := re.FindStringSubmatch(data)
@@ -177,7 +178,10 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	usable := map[string]M{}
 	for _, c := range candidates {
 		if obj(c["report"])["ok"] == true {
-			usable[str(c["base"])] = c
+			key := str(c["base"])
+			if previous := usable[key]; previous == nil || str(c["localRoot"]) != "" {
+				usable[key] = c
+			}
 		}
 	}
 	recommended := ""
@@ -192,12 +196,13 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	if len(usable) == 1 && ctx.Err() == nil {
 		for base, c := range usable {
 			recommended = str(c["id"])
-			if !currentHealthy {
+			if !currentHealthy || (currentKey == base && str(c["localRoot"]) != "" && v.CMSLocalRoot != str(c["localRoot"])) {
 				err := a.change(parent, "cms.auto-connected", func(next *state) error {
-					if next.CMSBase != v.CMSBase {
+					if next.CMSBase != v.CMSBase || next.CMSLocalRoot != v.CMSLocalRoot {
 						return problem(409, "连接已被其他操作更新，请重新检测")
 					}
 					next.CMSBase = base
+					next.CMSLocalRoot = str(c["localRoot"])
 					next.UpdatedAt = now()
 					return nil
 				})
@@ -207,6 +212,19 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 			}
 		}
 	}
+	if c := usable[currentKey]; c != nil && str(c["localRoot"]) != "" && str(c["localRoot"]) != a.readState().CMSLocalRoot && ctx.Err() == nil {
+		err := a.change(parent, "cms.local-connected", func(next *state) error {
+			if next.CMSBase != v.CMSBase || next.CMSLocalRoot != v.CMSLocalRoot {
+				return problem(409, "连接已被其他操作更新，请重新检测")
+			}
+			next.CMSLocalRoot = str(c["localRoot"])
+			next.UpdatedAt = now()
+			return nil
+		})
+		if err != nil {
+			warnings = append(warnings, "保存本地连接失败："+err.Error())
+		}
+	}
 	saved := a.readState().CMSBase
 	savedKey := saved
 	if u, err := cmsEndpoint(savedKey); savedKey != "" && err == nil {
@@ -214,9 +232,14 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	}
 	connected := usable[savedKey] != nil
 	var currentReport any
-	for _, c := range candidates {
-		if str(c["base"]) == savedKey {
-			currentReport = c["report"]
+	if selected := usable[savedKey]; selected != nil {
+		currentReport = selected["report"]
+	} else {
+		for _, c := range candidates {
+			if str(c["base"]) == savedKey {
+				currentReport = c["report"]
+				break
+			}
 		}
 	}
 
@@ -226,7 +249,7 @@ func (a *app) discoverAndConnect(parent context.Context) M {
 	return M{"candidates": candidates, "warnings": warnings, "recommendedId": recommended, "multiple": len(usable) > 1, "checkedAt": now(), "connected": connected, "connectedBase": saved, "currentReport": currentReport}
 }
 func (a *app) autoConnectCMS() {
-	if a.readState().CMSBase != "" {
+	if a.readState().CMSLocalRoot != "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -237,6 +260,24 @@ func (a *app) autoConnectCMS() {
 // Each attempted address is a real CMS content check; failed alternatives remain visible.
 func (a *app) probeCMSCandidate(ctx context.Context, candidate M) {
 	attempts := []M{}
+	candidate["recognized"] = str(candidate["root"]) != ""
+	if root := str(candidate["root"]); root != "" && str(candidate["base"]) != "" {
+		attemptCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		report := a.checkCMSWithRoot(attemptCtx, str(candidate["base"]), root)
+		cancel()
+		attempts = append(attempts, M{"base": candidate["base"], "source": "同服务器本地只读", "report": report})
+		candidate["report"] = report
+		candidate["source"] = "同服务器本地只读"
+		if report["ok"] == true {
+			candidate["localRoot"] = root
+			candidate["attempts"] = attempts
+			return
+		}
+	}
+	var localFailure any
+	if len(attempts) > 0 {
+		localFailure = attempts[0]["report"]
+	}
 	addresses, _ := candidate["addresses"].([]M)
 	if len(addresses) == 0 {
 		addresses = []M{{"base": candidate["base"], "source": "当前配置"}}
@@ -246,7 +287,7 @@ func (a *app) probeCMSCandidate(ctx context.Context, candidate M) {
 			break
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
-		report := a.checkCMS(attemptCtx, str(address["base"]))
+		report := a.checkCMSWithRoot(attemptCtx, str(address["base"]), "")
 		cancel()
 		attempts = append(attempts, M{"base": address["base"], "source": address["source"], "report": report})
 		candidate["report"] = report
@@ -255,6 +296,11 @@ func (a *app) probeCMSCandidate(ctx context.Context, candidate M) {
 		if report["ok"] == true {
 			break
 		}
+	}
+	if localFailure != nil && obj(candidate["report"])["ok"] != true {
+		candidate["report"] = localFailure
+		candidate["base"] = obj(localFailure)["base"]
+		candidate["source"] = "同服务器本地只读"
 	}
 	candidate["attempts"] = attempts
 	if candidate["report"] == nil {

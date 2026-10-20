@@ -147,6 +147,12 @@ func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M
 	if strings.TrimSpace(base) == "" {
 		return nil, coded(409, "运营端尚未连接苹果 CMS，请先在后台内容源与连接中配置并测试内容源", "CMS_NOT_CONFIGURED")
 	}
+	if root := a.localRootFor(base); root != "" {
+		return a.localCatalog(ctx, root, params)
+	}
+	return a.httpCatalog(ctx, base, params)
+}
+func (a *app) httpCatalog(ctx context.Context, base string, params url.Values) (M, error) {
 	u, e := cmsEndpoint(base)
 	if e != nil {
 		return nil, e
@@ -168,6 +174,9 @@ func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M
 	return v, nil
 }
 func (a *app) checkCMS(ctx context.Context, base string) M {
+	return a.checkCMSWithRoot(ctx, base, a.localRootFor(base))
+}
+func (a *app) checkCMSWithRoot(ctx context.Context, base, root string) M {
 	begin := time.Now()
 	report := M{"base": "", "configured": strings.TrimSpace(base) != "", "ok": false, "status": "unconfigured", "checkedAt": now(), "checks": []any{}, "latencyMs": int64(0), "message": "尚未配置苹果 CMS"}
 	if strings.TrimSpace(base) == "" {
@@ -180,6 +189,11 @@ func (a *app) checkCMS(ctx context.Context, base string) M {
 		return report
 	}
 	report["base"] = u.String()
+	report["transport"] = "http"
+	if root != "" {
+		report["transport"] = "local"
+		report["recognized"] = true
+	}
 	checks := make([]any, 2)
 	var wg sync.WaitGroup
 	for index, kind := range []string{"categories", "catalog"} {
@@ -193,11 +207,21 @@ func (a *app) checkCMS(ctx context.Context, base string) M {
 				params = url.Values{"ac": {"detail"}, "pg": {"1"}}
 				label = "影片接口"
 			}
-			v, e := a.catalogRaw(ctx, u.String(), params)
+			var v M
+			var e error
+			if root != "" {
+				v, e = a.localCatalog(ctx, root, params)
+			} else {
+				v, e = a.httpCatalog(ctx, u.String(), params)
+			}
 			c := M{"id": kind, "label": label, "ok": e == nil, "latencyMs": time.Since(start).Milliseconds()}
 			target := *u
 			target.RawQuery = params.Encode()
-			c["url"] = target.String()
+			if root == "" {
+				c["url"] = target.String()
+			} else {
+				c["label"] = strings.Replace(label, "接口", "本地读取", 1)
+			}
 			if e == nil {
 				key := "list"
 				if kind == "categories" {
@@ -257,6 +281,12 @@ func (a *app) checkCMS(ctx context.Context, base string) M {
 		if empty {
 			report["status"] = "empty"
 			report["message"] = "接口已连接，但分类或影片为空"
+		}
+	}
+	if root != "" && ready {
+		report["message"] = "本地只读连接已通过，不依赖采集接口开关"
+		if empty {
+			report["message"] = "本地只读连接已通过，分类或影片为空；不依赖采集接口开关"
 		}
 	}
 	report["latencyMs"] = time.Since(begin).Milliseconds()

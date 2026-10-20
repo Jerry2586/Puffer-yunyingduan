@@ -38,6 +38,7 @@ type state struct {
 	AppReleases           []appRelease       `json:"appReleases,omitempty"`
 	ManagedReleaseTargets map[string]bool    `json:"managedReleaseTargets,omitempty"`
 	ServiceRouting        M                  `json:"serviceRouting,omitempty"`
+	CMSLocalRoot          string             `json:"cmsLocalRoot,omitempty"`
 	CMSBase               string             `json:"cmsBase"`
 	UpdatedAt             string             `json:"updatedAt"`
 	Setup                 M                  `json:"setup"`

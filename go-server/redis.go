@@ -108,7 +108,7 @@ func (a *app) cachedCatalog(ctx context.Context, base string, params url.Values)
 	if c == nil {
 		return a.catalogRaw(ctx, base, params)
 	}
-	sum := sha256.Sum256([]byte(base + "\n" + params.Encode()))
+	sum := sha256.Sum256([]byte(base + "\n" + a.localRootFor(base) + "\n" + params.Encode()))
 	key := c.prefix + "catalog:v1:" + hex.EncodeToString(sum[:])
 	cached, err := c.client.Get(ctx, key).Bytes()
 	if err == nil {

@@ -456,12 +456,15 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			if e != nil {
 				return e
 			}
-			report := a.checkCMS(r.Context(), str(input["base"]))
-			if str(input["base"]) != "" && report["ok"] != true {
+			report, localRoot, e := a.selectedCMS(r.Context(), input)
+			if e != nil {
+				return e
+			}
+			if (str(input["base"]) != "" || str(input["siteId"]) != "") && report["ok"] != true {
 				jsonResponse(w, 400, M{"error": report["message"], "cmsStatus": report})
 				return nil
 			}
-			e = a.change(r.Context(), "cms.changed", func(next *state) error { next.CMSBase = str(report["base"]); return nil })
+			e = a.change(r.Context(), "cms.changed", func(next *state) error { next.CMSBase = str(report["base"]); next.CMSLocalRoot = localRoot; return nil })
 			if e != nil {
 				return e
 			}

@@ -8,6 +8,7 @@ const time=computed(()=>props.report?.checkedAt?new Date(props.report.checkedAt)
 <template>
   <view class="cms-report" :class="report?.status" aria-live="polite">
     <view class="cms-report-heading"><text>{{title}}</text><text class="cms-report-badge">{{label}}</text></view>
+    <text v-if="report?.transport" class="cms-report-message">连接方式：{{report.transport==='local'?'同服务器本地只读 · 无需开启采集接口':'HTTP 采集接口'}}</text>
     <text v-if="report?.base" class="cms-report-address">{{report.base}}</text>
     <text class="cms-report-message">{{report?.message||'填写苹果 CMS 站点地址后检测连接。'}}</text>
     <view v-for="check in report?.checks||[]" :key="check.id" class="cms-check-row">
