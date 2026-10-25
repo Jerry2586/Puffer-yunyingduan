@@ -464,6 +464,12 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if str(v.Setup["completedAt"]) == "" {
 			return coded(409, "请先完成安装向导", "SETUP_REQUIRED")
 		}
+		if strings.HasPrefix(route, "/api/admin/playback-engines") {
+			return a.adminPlaybackEngines(w, r)
+		}
+		if strings.HasPrefix(route, "/api/admin/playback-resolvers") {
+			return a.adminPlayback(w, r)
+		}
 		if route == "/api/admin/statistics" {
 			return a.clientStatistics(w, r)
 		}
@@ -530,6 +536,9 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		return problem(404, "此接口不属于运营服务")
 	}
 	v := a.readState()
+	if route == "/api/playback/config" || route == "/api/playback/negotiate" || route == "/api/playback/report" {
+		return a.clientPlaybackEngines(w, r, v)
+	}
 	if route == "/api/runtime" || route == "/api/client/bootstrap" || route == "/api/bootstrap" {
 		if r.Method != "GET" {
 			return problem(405, "请求方法不支持")
@@ -549,6 +558,7 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
+		out["playback"] = publicEngineSummary(v, p, osName)
 		jsonResponse(w, 200, out)
 		return nil
 	}

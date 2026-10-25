@@ -21,6 +21,7 @@ func clientName(p string) string {
 }
 
 var publicClientRoutes = map[string]string{
+	"playback/config": "/api/playback/config", "playback/negotiate": "/api/playback/negotiate", "playback/report": "/api/playback/report",
 	"bootstrap": "/api/client/bootstrap", "catalog": "/api/catalog", "catalog/categories": "/api/catalog/categories", "playback": "/api/playback",
 	"member/config": "/api/member/config", "member/plans": "/api/member/plans", "member/profile": "/api/member/profile", "member/orders": "/api/member/orders", "member/order": "/api/member/order",
 	"member/login": "/api/member/login", "member/register": "/api/member/register", "member/logout": "/api/member/logout", "member/purchase": "/api/member/purchase", "member/upgrade": "/api/member/upgrade", "member/recharge": "/api/member/recharge", "member/checkout": "/api/member/checkout", "member/card": "/api/member/card",

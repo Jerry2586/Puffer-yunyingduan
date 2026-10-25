@@ -159,7 +159,35 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		if e != nil || u.Host == "" || !has([]string{"http", "https"}, u.Scheme) || u.User != nil {
 			return problem(400, "CMS 未返回支持的视频地址")
 		}
-		jsonResponse(w, 200, M{"url": u.String(), "name": str(info["name"])})
+		var engineClient *engineBuild
+		if raw, exists := input["playbackClient"]; exists {
+			engineClient = &engineBuild{}
+			if e := decodeEngineValue(raw, engineClient); e != nil {
+				return e
+			}
+		}
+		enginePolicy, e := negotiateEngine(v, p, engineClient)
+		if e != nil {
+			return e
+		}
+		settings := playbackState(v)
+		excluded, e := resolverExcludes(input["excludeSourceIds"], settings.Published)
+		if e != nil {
+			return e
+		}
+		resolved, e := a.resolvePlayback(r.Context(), settings.Published, u.String(), p, excluded)
+		if e != nil {
+			return e
+		}
+		if !resolved.OK {
+			jsonResponse(w, 502, M{"error": resolved.Message, "code": "PLAYBACK_RESOLUTION_FAILED", "attempts": resolved.Attempts})
+			return nil
+		}
+		out := M{"url": resolved.URL, "name": str(info["name"]), "sourceId": resolved.SourceID, "kind": resolved.Kind, "attempts": resolved.Attempts, "resolverVersion": settings.PublishedVersion, "enginePolicy": enginePolicy}
+		if engineClient != nil && enginePolicy["status"] == "negotiated" {
+			out["engineReportTicket"] = issueEngineReportTicket(v, p, engineClient, enginePolicy)
+		}
+		jsonResponse(w, 200, out)
 		return nil
 	}
 	name := strings.TrimPrefix(route, "/api/member/")

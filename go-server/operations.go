@@ -455,6 +455,22 @@ func bootstrap(v state, p, os, version, origin string) (M, error) {
 	return M{"schemaVersion": 1, "contract": contract, "themeContract": "hetun-runtime-v1", "platform": p, "os": os, "version": r.PublishedVersion, "publishedAt": r.PublishedAt, "config": config, "serviceBase": origin, "pollSeconds": 15, "cmsConfigured": v.CMSBase != "", "update": M{"available": available, "required": available && settings["forceUpdate"] == true, "version": settings["latestVersion"], "notes": settings["updateNotes"], "url": download, "browserUrl": settings["browserUrl"], "sizeMB": settings["sizeMB"], "releaseId": settings["releaseId"]}}, nil
 }
 func validateState(v state) error {
+	if v.PlaybackEngines != nil {
+		if e := validateEngineConfig(v.PlaybackEngines.Draft, false); e != nil {
+			return e
+		}
+		if e := validateEngineConfig(v.PlaybackEngines.Published, true); e != nil {
+			return e
+		}
+	}
+	if v.Playback != nil {
+		if e := validatePlayback(v.Playback.Draft); e != nil {
+			return e
+		}
+		if e := validatePlayback(v.Playback.Published); e != nil {
+			return e
+		}
+	}
 	for _, p := range platforms {
 		r := v.Operations[p]
 		if r == nil || r.Version < 1 || r.PublishedVersion < 1 {

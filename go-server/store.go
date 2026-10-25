@@ -35,6 +35,8 @@ type credential struct {
 	Algorithm string `json:"algorithm"`
 }
 type state struct {
+	PlaybackEngines       *engineSettings       `json:"playbackEngines,omitempty"`
+	Playback              *playbackSettings     `json:"playbackResolvers,omitempty"`
 	Advertising           map[string]*adAccount `json:"advertising,omitempty"`
 	AppReleases           []appRelease          `json:"appReleases,omitempty"`
 	ManagedReleaseTargets map[string]bool       `json:"managedReleaseTargets,omitempty"`

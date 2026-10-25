@@ -13,7 +13,7 @@ export function request<T>(endpoint:string,method:'GET'|'POST'|'PUT'='GET',data?
   // #ifdef APP-PLUS
   if(!base) return Promise.reject(new Error('应用未配置服务地址，请联系运营方更新安装包。'));
   // #endif
-  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':platform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:endpoint==='/api/admin/setup/discover'?65000:['/api/health','/api/admin/setup'].includes(endpoint)||endpoint.startsWith('/api/admin/state?')||/^\/api\/admin\/clients\/(mobile|tablet|tv|desktop)\/state$/.test(endpoint)?10000:25000,
+  return new Promise((resolve,reject) => uni.request({url:base+endpoint,method,data,withCredentials:true,header:{'Content-Type':'application/json','X-Hetun-Client':'studio','X-Hetun-Platform':platform,...(uni.getStorageSync('hetun-member-token')?{Authorization:'Bearer '+uni.getStorageSync('hetun-member-token')}:{})},timeout:/(^|\/)playback$/.test(endpoint)?45000:endpoint==='/api/admin/setup/discover'?65000:['/api/health','/api/admin/setup'].includes(endpoint)||endpoint.startsWith('/api/admin/state?')||/^\/api\/admin\/clients\/(mobile|tablet|tv|desktop)\/state$/.test(endpoint)?10000:25000,
     success:response => { const payload=response.data as any; if(response.statusCode>=200 && response.statusCode<300) resolve(payload); else reject(Object.assign(new Error(payload?.error || '服务连接失败：'+response.statusCode),{status:response.statusCode,code:payload?.code,cmsStatus:payload?.cmsStatus})); },
     fail:() => reject(new Error('无法连接河豚服务，请检查服务地址和网络。'))}));
 }
@@ -129,3 +129,30 @@ export interface ClientStatisticsReport {
  business:{publishedVersion:number;publishedAt:string;releases:number;advertisingVersion:number;advertising:{requests:number;fills:number;impressions:number;clicks:number;completes:number;errors:number;rewards:number;points:number}};
 }
 export const clientStatisticsApi={get:(platform:Platform)=>adminClientRequest<ClientStatisticsReport>(platform,'statistics')};
+
+export interface PlaybackResolverSource {id:string;name:string;kind:'json'|'redirect';endpoint:string;urlField:string;enabled:boolean;platforms:Platform[];}
+export interface PlaybackResolverConfig {enabled:boolean;directFirst:boolean;timeoutSeconds:number;totalSeconds:number;maxAttempts:number;sources:PlaybackResolverSource[];}
+export interface PlaybackResolverSettings {revision:number;publishedVersion:number;publishedAt:string;draft:PlaybackResolverConfig;published:PlaybackResolverConfig;}
+export interface ResolverAttempt {id:string;name:string;ok:boolean;elapsedMs:number;message:string;}
+export interface PlaybackResolverResult {ok:boolean;url?:string;sourceId?:string;kind?:string;attempts:ResolverAttempt[];message:string;}
+export const playbackResolverApi={
+ get:()=>request<PlaybackResolverSettings>('/api/admin/playback-resolvers'),
+ save:(revision:number,config:PlaybackResolverConfig)=>request<PlaybackResolverSettings>('/api/admin/playback-resolvers','PUT',{revision,config}),
+ publish:(revision:number)=>request<PlaybackResolverSettings>('/api/admin/playback-resolvers/publish','POST',{revision}),
+ test:(config:PlaybackResolverConfig,url:string,platform:Platform)=>request<PlaybackResolverResult>('/api/admin/playback-resolvers/test','POST',{config,url,platform})
+};
+
+export interface PlaybackEngineDefinition {id:string;name:string;systems:string[];commercial:boolean;}
+export interface PlaybackInstalledEngine {id:string;version:string;license:'not_required'|'unknown'|'valid'|'invalid';}
+export interface PlaybackEngineBuild {contract:'hetun-playback-build-v1';platform:Platform;os:string;appId:string;appVersion:string;engines:PlaybackInstalledEngine[];features:string[];}
+export interface PlaybackEngineProfile {platform:Platform;os:string;enabled:boolean;build:PlaybackEngineBuild|null;primary:string;backup:string;manualSwitch:boolean;autoSwitch:boolean;switchOn:string[];resumePosition:boolean;maxSwitches:number;maxAttempts:number;sessionSeconds:number;}
+export interface PlaybackEngineConfig {profiles:PlaybackEngineProfile[];}
+export interface PlaybackEngineObservation {platform:Platform;os:string;appId:string;appVersion:string;engine:string;outcome:'prepared'|'failed';reason:string;license:string;at:string;policyVersion:number;}
+export interface PlaybackEngineSettings {revision:number;publishedVersion:number;publishedAt:string;draft:PlaybackEngineConfig;published:PlaybackEngineConfig;observations:PlaybackEngineObservation[];}
+export interface PlaybackEngineAdmin {settings:PlaybackEngineSettings;engines:PlaybackEngineDefinition[];targets:{platform:Platform;os:string;label:string}[];contract:string;capabilitySource:string;observationSource:string;}
+export const playbackEngineApi={
+ get:()=>request<PlaybackEngineAdmin>('/api/admin/playback-engines'),
+ save:(revision:number,config:PlaybackEngineConfig)=>request<PlaybackEngineAdmin>('/api/admin/playback-engines','PUT',{revision,config}),
+ publish:(revision:number)=>request<PlaybackEngineAdmin>('/api/admin/playback-engines/publish','POST',{revision}),
+ inspect:(build:unknown)=>request<{build:PlaybackEngineBuild;source:string;deviceVerified:boolean}>('/api/admin/playback-engines/inspect','POST',{build})
+};
