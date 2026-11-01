@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {computed,ref,watch} from 'vue';
+import {categoryContains} from '@/domain/operation-pages';
 import type {Theme,Vod,Category,Section,AppPage} from '@/domain/types';
 import {assetUrl} from '@/services/api';
 import FilmModule from './FilmModule.vue';
@@ -11,7 +12,7 @@ const history=ref<string[]>([]);
 try {const saved=uni.getStorageSync('hetun-search-history');if(Array.isArray(saved))history.value=saved.filter(v=>typeof v==='string').slice(0,12);}catch{}
 watch(()=>[props.attempted,props.query],()=>{if(!props.attempted||!props.query.trim())return;history.value=[props.query.trim(),...history.value.filter(v=>v!==props.query.trim())].slice(0,12);uni.setStorageSync('hetun-search-history',history.value);});
 watch(()=>props.categoryId,()=>{area.value='';year.value='';});
-const browsing=computed(()=>props.page==='search'&&!props.attempted?props.discovery.filter(v=>!props.categoryId||v.categoryId===props.categoryId):props.items);
+const browsing=computed(()=>props.page==='search'&&!props.attempted?props.discovery.filter(v=>!props.categoryId||categoryContains(props.categories,props.categoryId,v.categoryId)):props.items);
 const areas=computed(()=>[...new Set(browsing.value.map(v=>v.area).filter(Boolean))]);
 const years=computed(()=>[...new Set(browsing.value.map(v=>v.year).filter(Boolean))].sort().reverse());
 const list=computed(()=>{let rows=browsing.value.filter(v=>(!area.value||v.area===area.value)&&(!year.value||v.year===year.value));if(sort.value==='score'||props.page==='ranking')rows.sort((a,b)=>Number(b.score||0)-Number(a.score||0));if(sort.value==='year')rows.sort((a,b)=>b.year.localeCompare(a.year));return rows;});

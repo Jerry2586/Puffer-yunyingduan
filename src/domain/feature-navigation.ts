@@ -1,6 +1,7 @@
 import type {Theme,NavItem} from './types';
 export function setFeatureEnabled(theme:Theme,key:keyof Theme['features'],enabled:boolean){
  theme.features[key]=enabled;
+ if(import.meta.env.VITE_HETUN_OPERATIONS_CENTER==='1'){for(const n of theme.navigation)if(n.page===key)n.enabled=enabled;return;}
  if(!enabled||!['schedule','ranking'].includes(key))return;
  if(theme.navigation.some(n=>n.page===key))return;
  const used=new Set(theme.navigation.map(n=>n.id));let id:string=key;let suffix=1;while(used.has(id))id=key+'-'+suffix++;

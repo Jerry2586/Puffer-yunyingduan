@@ -28,7 +28,7 @@ var publicClientRoutes = map[string]string{
 	"ads/config": "/api/ads/config", "ads/decision": "/api/ads/decision", "ads/events": "/api/ads/events", "ads/balance": "/api/ads/balance",
 }
 var adminClientRoutes = map[string]string{
-	"statistics": "/api/admin/statistics", "state": "/api/admin/state", "draft": "/api/admin/draft", "publish": "/api/admin/publish", "rollback": "/api/admin/rollback",
+	"statistics": "/api/admin/statistics", "state": "/api/admin/state", "draft": "/api/admin/draft", "apply": "/api/admin/apply", "publish": "/api/admin/publish", "rollback": "/api/admin/rollback",
 	"cache": "/api/admin/client-cache", "cache/clear": "/api/admin/client-cache/clear", "cache/search/rebuild": "/api/admin/client-cache/search/rebuild",
 	"ads": "/api/admin/ads", "ads/publish": "/api/admin/ads/publish", "ads/diagnose": "/api/admin/ads/diagnose",
 	"releases": "/api/admin/releases", "releases/delete": "/api/admin/releases/delete",

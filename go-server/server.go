@@ -511,7 +511,7 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			out["cmsStatus"] = report
 			jsonResponse(w, 200, out)
 			return nil
-		case (route == "/api/admin/draft" && r.Method == "PUT") || ((route == "/api/admin/publish" || route == "/api/admin/rollback") && r.Method == "POST"):
+		case ((route == "/api/admin/draft" || route == "/api/admin/apply") && r.Method == "PUT") || ((route == "/api/admin/publish" || route == "/api/admin/rollback") && r.Method == "POST"):
 			input, e := readBody(w, r, 256*1024)
 			if e != nil {
 				return e
@@ -524,11 +524,23 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 				return e
 			}
 			action := path.Base(route)
-			e = a.change(r.Context(), "runtime."+action, func(next *state) error { return mutateOperations(next, input, action) })
+			var result M
+			e = a.change(r.Context(), "runtime."+action, func(next *state) error {
+				if err := mutateOperations(next, input, action); err != nil {
+					return err
+				}
+				result = studio(*next, p)
+				return nil
+			})
 			if e != nil {
+				var api *apiError
+				if action == "apply" && !errors.As(e, &api) {
+					log.Printf("运营配置保存失败: %v", e)
+					return problem(500, "保存失败，请稍后重试；上次生效配置保持不变")
+				}
 				return e
 			}
-			jsonResponse(w, 200, studio(a.readState(), p))
+			jsonResponse(w, 200, result)
 			return nil
 		case route == "/api/admin/asset" && r.Method == "POST":
 			return a.upload(w, r)
@@ -577,7 +589,11 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		items := []any{}
 		for _, raw := range arr(raw["class"]) {
 			m := obj(raw)
-			items = append(items, M{"id": str(m["type_id"]), "name": clean(m["type_name"])})
+			item := M{"id": str(m["type_id"]), "name": clean(m["type_name"])}
+			if parent, exists := m["type_pid"]; exists {
+				item["parentId"] = str(parent)
+			}
+			items = append(items, item)
 		}
 		jsonResponse(w, 200, M{"items": items})
 		return nil

@@ -94,10 +94,13 @@ func requestPlatform(r *http.Request) (string, error) {
 }
 func operationConfig(input M) (M, error) {
 	out := M{}
-	fields := map[string][]string{"sections": {"id", "enabled", "page", "title", "subtitle", "source", "categoryId", "limit", "orderBy", "manualIds"}, "navigation": {"id", "label", "enabled", "page", "categoryId"}, "categories": {"id", "label", "enabled", "page", "categoryId"}, "ads": {"id", "name", "slot", "enabled", "media", "asset", "page", "url", "start", "end", "duration", "skipAfter", "frequency"}, "schedule": {"id", "vodId", "title", "date"}}
+	fields := map[string][]string{"sections": {"id", "enabled", "page", "title", "subtitle", "source", "categoryId", "limit", "orderBy", "manualIds", "pageId"}, "serviceMenuItems": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor", "targetType", "url"}, "navigation": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "categories": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "ads": {"id", "name", "slot", "enabled", "media", "asset", "page", "url", "start", "end", "duration", "skipAfter", "frequency"}, "schedule": {"id", "vodId", "title", "date", "categoryId"}}
 	for key, keys := range fields {
 		value, exists := input[key]
 		if !exists {
+			if key == "serviceMenuItems" {
+				continue
+			}
 			value = defaults[key]
 		}
 		xs, ok := value.([]any)
@@ -288,22 +291,28 @@ func operationConfig(input M) (M, error) {
 				return nil, problem(400, "轮播素材无效")
 			}
 		}
-		clean = append(clean, pick(m, "id", "vodId", "title", "image", "video", "page"))
+		clean = append(clean, pick(m, "id", "vodId", "title", "image", "video", "page", "pageId"))
 	}
 	out["carousel"] = M{"slides": clean}
+	if err := operationPages(input, out); err != nil {
+		return nil, err
+	}
+	if err := operationCarousels(input, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 func mergeOperations(config M) M {
 	out := clone(defaults)
 	for k, v := range config {
 		switch k {
-		case "sections", "navigation", "categories":
+		case "sections", "navigation", "categories", "serviceMenuItems":
 			list := []any{}
 			base := arr(defaults[k])
 			for _, raw := range arr(v) {
 				m := obj(raw)
 				item := M{}
-				if len(base) > 0 {
+				if k == "sections" && len(base) > 0 {
 					item = clone(obj(base[0]))
 				}
 				for _, b := range base {
@@ -359,6 +368,16 @@ func studio(v state, p string) M {
 	out["history"] = history
 	return out
 }
+func publishOperations(r *record) {
+	r.History = append([]snapshot{{r.PublishedVersion, r.PublishedAt, clone(r.Published)}}, r.History...)
+	if len(r.History) > 20 {
+		r.History = r.History[:20]
+	}
+	r.Published = clone(r.Draft)
+	r.PublishedVersion++
+	r.PublishedAt = now()
+}
+
 func mutateOperations(v *state, input M, action string) error {
 	p, e := platform(str(input["template"]))
 	if e != nil {
@@ -369,7 +388,7 @@ func mutateOperations(v *state, input M, action string) error {
 		return problem(409, "此端配置已被修改，请重新加载")
 	}
 	switch action {
-	case "draft":
+	case "draft", "apply":
 		m, ok := input["theme"].(map[string]any)
 		if !ok {
 			return problem(400, "运营配置必须为对象")
@@ -384,6 +403,9 @@ func mutateOperations(v *state, input M, action string) error {
 			}
 		}
 		r.Draft = clean
+		if action == "apply" {
+			publishOperations(r)
+		}
 		r.Version++
 	case "publish", "rollback":
 		if action == "rollback" {
@@ -399,14 +421,8 @@ func mutateOperations(v *state, input M, action string) error {
 			}
 			r.Draft = clone(found)
 		}
-		r.History = append([]snapshot{{r.PublishedVersion, r.PublishedAt, clone(r.Published)}}, r.History...)
-		if len(r.History) > 20 {
-			r.History = r.History[:20]
-		}
-		r.Published = clone(r.Draft)
-		r.PublishedVersion++
+		publishOperations(r)
 		r.Version++
-		r.PublishedAt = now()
 	default:
 		return problem(404, "操作不存在")
 	}

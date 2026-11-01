@@ -51,6 +51,7 @@ export const api={
   categories:()=>clientRequest<{items:Category[]}>('catalog/categories'),
   login:(username:string,password:string)=>request('/api/admin/login','POST',{username,password}),
   logout:()=>request('/api/admin/logout','POST',{}),state:(template='')=>adminClientRequest<StudioState>(templatePlatform(template),'state'),
+  apply:(theme:Theme,version:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'apply','PUT',{theme,version}),
   save:(theme:Theme,version:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'draft','PUT',{theme,version}),
   publish:(version:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'publish','POST',{version}),
   rollback:(version:number,targetVersion:number,template='')=>adminClientRequest<StudioState>(templatePlatform(template),'rollback','POST',{version,targetVersion}),

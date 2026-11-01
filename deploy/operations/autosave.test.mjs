@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const local=createRequire(path.join(root,'package.json'));
+const cached=createRequire(path.join(process.env.LOCALAPPDATA,'Programs/UniAppTools/projects/hetun-app-c7cb6e60b06b/runtime/workspace/package.json'));
+let ts;try{ts=local('typescript');}catch{ts=cached('typescript');}
+const mod={exports:{}};
+new Function('module','exports',ts.transpileModule(fs.readFileSync(path.join(root,'src/domain/operations-autosave.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(mod,mod.exports);
+const {createOperationsAutosave}=mod.exports;
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
+function setup(save,delay=650){const statuses=[],accepted=[];const c=createOperationsAutosave({save,accepted:(...v)=>accepted.push(v),status:s=>statuses.push(s),delay});c.reset('mobile',{label:'initial'},1);return {c,statuses,accepted};}
+test('hydrate and reverted edits do not save or imply applied configuration',async()=>{let calls=0;const {c,statuses}=setup(async()=>{calls++;});c.edit({label:'changed'});c.edit({label:'initial'});await c.flush();assert.equal(calls,0);assert.equal(statuses.at(-1).phase,'idle');c.dispose();});
+test('debounce merges input and flush serializes in-flight edits with returned version',async()=>{const calls=[],first=deferred();const {c,accepted,statuses}=setup(async(key,value,version)=>{calls.push({key,value,version});if(calls.length===1)return first.promise;return {value,version:3};});c.edit({label:'a'});c.edit({label:'b'});const pending=c.flush();assert.equal(c.flush(),pending);await tick();assert.equal(calls.length,1);assert.equal(calls[0].value.label,'b');c.edit({label:'c'});first.resolve({value:{label:'B'},version:2});await pending;assert.equal(calls.length,2);assert.equal(calls[1].version,2);assert.equal(calls[1].value.label,'c');assert.equal(accepted[0][2],false);assert.equal(accepted[1][2],true);assert.equal(statuses.at(-1).phase,'saved');c.dispose();});
+test('server canonicalization is accepted without another write',async()=>{let calls=0;const {c,accepted}=setup(async()=>{calls++;return {value:{label:'clean'},version:2};});c.edit({label:'raw'});await c.flush();await c.flush();assert.equal(calls,1);assert.deepEqual(accepted[0][1].value,{label:'clean'});c.dispose();});
+test('failed write preserves edit and version for explicit retry',async()=>{const calls=[];const {c,statuses}=setup(async(key,value,version)=>{calls.push({value,version});if(calls.length===1)throw Error('offline');return {value,version:2};});c.edit({label:'keep'});await assert.rejects(c.flush(),/offline/);assert.equal(statuses.at(-1).phase,'error');await c.flush();assert.deepEqual(calls[1],calls[0]);assert.equal(statuses.at(-1).phase,'saved');c.dispose();});
+test('conflict blocks writes until explicit reload; reset cannot race in-flight request',async()=>{let calls=0;const wait=deferred();const {c,statuses}=setup(async()=>{calls++;return wait.promise;});c.edit({label:'keep'});const saving=c.flush();await tick();assert.throws(()=>c.reset('tv',{label:'tv'},1),/保存尚未完成/);wait.reject(Object.assign(Error('conflict'),{status:409}));await assert.rejects(saving,/conflict/);c.edit({label:'still kept'});await assert.rejects(c.flush(),/conflict/);assert.equal(calls,1);assert.equal(statuses.at(-1).phase,'conflict');c.reset('tv',{label:'tv'},5);assert.equal(statuses.at(-1).phase,'idle');c.dispose();});
+test('paused debounce can resume after failed reload; dispose ignores late response',async()=>{let calls=0;const {c,statuses}=setup(async(key,value)=>{calls++;return {value,version:2};},5);c.edit({label:'pending'});await c.pause();await new Promise(r=>setTimeout(r,15));assert.equal(calls,0);c.resume();await new Promise(r=>setTimeout(r,25));assert.equal(calls,1);assert.equal(statuses.at(-1).phase,'saved');c.dispose();const wait=deferred();const next=setup(()=>wait.promise);next.c.edit({label:'late'});const saving=next.c.flush();await tick();next.c.dispose();wait.resolve({value:{label:'late'},version:2});await saving;assert.equal(next.accepted.length,0);});
+
+test('flush includes edits queued at the saved-status microtask boundary',async()=>{const calls=[];let c,queued=false;c=createOperationsAutosave({delay:1000,save:async(key,value,version)=>{calls.push(value);return {value,version:version+1};},accepted:()=>{},status:s=>{if(s.phase==='saved'&&!queued){queued=true;queueMicrotask(()=>c.edit({label:'last'}));}}});c.reset('mobile',{label:'initial'},1);c.edit({label:'first'});await c.flush();assert.deepEqual(calls,[{label:'first'},{label:'last'}]);c.dispose();});

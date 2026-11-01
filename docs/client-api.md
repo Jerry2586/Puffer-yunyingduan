@@ -34,7 +34,8 @@
 |---|---|---|
 | statistics | GET | 当前端真实请求统计和持久业务摘要，需要管理员会话 |
 | state | GET | 当前端运营状态 |
-| draft | PUT | 保存运营草稿，传 theme/version |
+| apply | PUT | 校验、保存并生效，传 theme/version；同一事务更新草稿、客户端可读配置和变更记录，版本冲突返回409 |
+| draft | PUT | 保存运营草稿，传 theme/version（兼容旧调用） |
 | publish | POST | 发布当前端草稿，传 version |
 | rollback | POST | 回退当前端历史，传 version/targetVersion |
 | releases | GET/POST/PUT | 查询、新增、编辑当前端应用版本 |
@@ -57,3 +58,40 @@ AdMob 服务商签名回调继续使用共享 `/api/ads/callback/admob`；不能
 
 缓存未配置时清理返回 409，Redis 连接失败返回 503。分类可读取不代表播放、支付或原生广告 SDK 可用；会员、播放依赖 CMS 适配，商业广告依赖原生 SDK 与服务商配置。`iapReady`、`cardReady` 等状态沿用实际能力。本次测试使用隔离 CMS HTTP 夹具和临时 Redis，不代表生产站点或真机已经验收。
 
+
+运营配置编辑采用650毫秒合并输入、单请求串行自动保存；失败保留编辑并显示重试，409冲突须重新读取后再编辑。打开页面不自动写入。成功表示服务端已持久化，客户端下次同步生效；bootstrap 的 pollSeconds 为15，不代表手机已收到。广告中心、版本管理、系统设置和播放器解析各自保留原有提交流程。
+
+
+## 按一级分类绑定轮播组（运营中心本地阶段）
+
+运营配置可选字段 `carouselGroups` 通过既有 `PUT /api/admin/clients/{client}/apply` 自动保存并生效。未提交该字段的旧配置保持旧行为；原有 `carousel.slides` 兼容保留，两个字段不会相互复制或覆盖。
+
+```json
+{
+  "carouselGroups": [{
+    "id": "movie-hero",
+    "name": "电影轮播",
+    "enabled": true,
+    "entryIds": ["movie-nav"],
+    "slides": [{
+      "id": "feature",
+      "title": "本周精选",
+      "image": "https://example.com/hero.jpg",
+      "sourceVodId": "12",
+      "enabled": true,
+      "target": {"type": "vod", "vodId": "34"}
+    }]
+  }]
+}
+```
+
+- `entryIds` 指 `categories[].id`（APP 一级分类入口编号），不是苹果 CMS 的 `categoryId`。即使两个入口绑定同一个 CMS 分类，也可独立配置轮播。每个入口最多属于一个组，每个组最多绑定一个入口（未完成草稿允许零个）；关闭组仍保留绑定关系。
+- 展示影片 `sourceVodId`、展示图片和点击目标相互独立。`target` 只允许一种目标：`vod/vodId`、`page/pageId`、`external/url`、`system/page`。`pageId` 必须是已创建的 `contentPages[].id`；`system.page` 使用既有 APP 功能路由。前端删除内容页时清理失效引用并关闭受影响条目；分类删除导致组失去绑定时关闭该组。服务端拒绝悬空引用。
+- 每端最多40组、每组20条、合计200条，每组最多1个入口。组名1–240字节，标题最多240字节；影片编号为空或1–20位数字。组和条目都必须显式提供布尔开关。
+- 图片仅允许完整 HTTP(S) 地址或已有 `/api/assets/<64位小写十六进制哈希>.(png|jpg|webp)`；URL 最多2048字符，拒绝账号密码、空白、反斜线及脚本协议。外部目标遵守相同 HTTP(S) 约束。轮播图片不接收 MP4。
+- 新组和新条目默认关闭，允许保存尚未填完的草稿。开启组须绑定入口，允许空内容或所有条目关闭；关闭、删除最后一条内容不改变组开关。组内启用内容须有图片和完整点击目标。关闭状态不豁免非空字段的格式、引用和容量校验。公开配置可能含关闭内容，消费端应同时遵守组、入口、条目的开关。
+- 运营中心管理轮播内容、顺序、绑定和目标；宽高、裁切、位置等骨架几何与视觉字段不接受运营配置覆盖。
+
+目录影片展示数据新增可选 `carouselImage`，来自苹果 CMS 的 `vod_pic_slide`，无有效轮播图时编辑器使用海报。直连 CMS 数据库缺少该可选列时回退原字段查询。目录接口继续隐藏播放地址，播放仍走既有授权接口。
+
+此阶段只实现运营中心编辑、校验、持久化和配置下发，主题中心、打包器与原生 APP 对 `carouselGroups` 的呈现对接等待后续指令。自动保存成功表示服务端已保存并更新配置，不能据此声称手机已收到或新轮播已在手机显示。

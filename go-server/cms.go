@@ -315,7 +315,7 @@ func imageURL(value any, base string) string {
 	return u.String()
 }
 func normalizeVod(v M, base string) M {
-	out := M{"id": str(v["vod_id"]), "poster": imageURL(v["vod_pic"], base), "protected": true, "categoryId": str(v["type_id"])}
+	out := M{"id": str(v["vod_id"]), "poster": imageURL(v["vod_pic"], base), "carouselImage": imageURL(v["vod_pic_slide"], base), "protected": true, "categoryId": str(v["type_id"])}
 	for k, source := range map[string]string{"title": "vod_name", "category": "type_name", "year": "vod_year", "area": "vod_area", "score": "vod_score", "actors": "vod_actor", "director": "vod_director"} {
 		out[k] = clean(v[source])
 	}

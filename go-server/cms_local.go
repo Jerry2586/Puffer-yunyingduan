@@ -401,7 +401,13 @@ func (a *app) localCatalog(ctx context.Context, root string, p url.Values) (M, e
 	}
 	fields := "v.vod_id,v.vod_name,v.vod_pic,v.type_id,t.type_name,v.vod_year,v.vod_area,v.vod_score,v.vod_actor,v.vod_director,v.vod_remarks,v.vod_state,v.vod_content,v.vod_blurb,v.vod_play_from,v.vod_play_url"
 	queryArgs := append(append([]any{}, args...), limit, (page-1)*limit)
-	xs, e := selectCMSRows(ctx, tx, "SELECT "+fields+from+" ORDER BY v.vod_time DESC,v.vod_id DESC LIMIT ? OFFSET ?", queryArgs...)
+	queryEnd := from + " ORDER BY v.vod_time DESC,v.vod_id DESC LIMIT ? OFFSET ?"
+	xs, e := selectCMSRows(ctx, tx, "SELECT "+fields+",v.vod_pic_slide"+queryEnd, queryArgs...)
+	// Older CMS schemas may omit the optional landscape carousel artwork column.
+	var mysqlErr *mysql.MySQLError
+	if errors.As(e, &mysqlErr) && mysqlErr.Number == 1054 && strings.Contains(mysqlErr.Message, "vod_pic_slide") {
+		xs, e = selectCMSRows(ctx, tx, "SELECT "+fields+queryEnd, queryArgs...)
+	}
 	if e != nil {
 		return nil, localCMSError(e)
 	}
