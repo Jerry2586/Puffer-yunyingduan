@@ -202,6 +202,15 @@ func operationNavigation(input, out M) error {
 			}
 			validated["columns"] = columns
 		}
+		if value, exists := group["appearance"]; exists {
+			appearance, err := operationAppearance(value, "middle")
+			if err != nil {
+				return err
+			}
+			if len(appearance) > 0 {
+				validated["appearance"] = appearance
+			}
+		}
 		if owner != "" {
 			clean = append(clean, validated)
 		}

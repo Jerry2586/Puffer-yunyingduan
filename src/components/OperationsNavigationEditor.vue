@@ -8,6 +8,7 @@ import CmsCategoryBinding from './CmsCategoryBinding.vue';
 import NavigationArtwork from './NavigationArtwork.vue';
 import EntryTextColor from './EntryTextColor.vue';
 import EditorChoice from './EditorChoice.vue';
+import OperationsLayoutFields from './OperationsLayoutFields.vue';
 import OperationsShortcutsEditor from './OperationsShortcutsEditor.vue';
 const props=defineProps<{theme:Theme;categories:Category[];loadCategories:()=>Promise<Category[]>}>();
 const emit=defineEmits<{create:[entry?:NavItem];message:[message:string]}>();
@@ -48,6 +49,7 @@ function checked(e:any){return Boolean(e.detail.value);}
  <view class="group-tabs" role="tablist" aria-label="选择导航位置"><button v-for="g in groups" :key="g.id" role="tab" :aria-selected="group===g.id" :class="{chosen:group===g.id}" @click="selectGroup(g.id)">{{g.label}}<text>{{count(g.id)}}</text></button></view>
  <OperationsShortcutsEditor v-if="group==='shortcuts'" :theme="theme" :categories="categories"/>
  <template v-else>
+ <OperationsLayoutFields v-if="group==='serviceMenuItems'" v-model="theme.serviceMenuStyle" kind="menu" title="左上角菜单排版" :text-color="theme.colors.text" :background="theme.colors.background" :accent="theme.colors.accent"/>
  <view class="group-header"><view><text class="section-title">{{groups.find(g=>g.id===group)?.label}}</text><text class="muted">{{description}}</text></view><button v-if="group!=='navigation'" class="primary" @click="add">＋ 添加入口</button></view>
  <view v-if="group==='serviceMenuItems'" class="menu-switch"><view><text>显示左上角菜单</text><text class="muted">关闭后隐藏整个入口，保留菜单配置</text></view><switch :checked="theme.features.serviceMenu" @change="theme.features.serviceMenu=checked($event)"/></view>
  <view class="navigation-preview" aria-label="导航实时预览"><button v-for="n in entries.filter(n=>n.enabled)" :key="n.id" :class="{chosen:n.id===selectedId}" :style="{fontSize:style.fontSize?style.fontSize+'px':undefined,color:n.id===selectedId?style.activeColor:style.color}"  :aria-label="n.label" @click="selectEntry(n)"><NavigationArtwork v-if="display(n)!=='text'" :theme="theme" :entry="n" :active="n.id===selectedId" :size="20" :color="n.id===selectedId?style.activeColor:style.color"/><text v-if="display(n)!=='icon'" :style="{color:n.textColor}">{{n.label}}</text></button><text v-if="!entries.some(n=>n.enabled)" class="muted">暂无已开启入口</text></view>

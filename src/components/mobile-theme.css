@@ -279,3 +279,7 @@
 .phone-native .short-actions{right:12px;bottom:100px;gap:18px}
 .phone-native .short-actions text{font-size:9px}
 .phone-native.mode-light .mine-membership{box-shadow:none}
+
+.native-menu.custom-menu-layout{width:var(--menu-width);max-width:none;padding:var(--menu-padding);background:var(--menu-bg);color:var(--menu-color)}
+.custom-menu-layout .native-menu-links{display:flex;flex-direction:column;gap:var(--menu-gap)}
+.custom-menu-layout .native-menu-links>view{min-height:var(--menu-row-height);box-sizing:border-box;margin:0;padding:8px 12px;border-radius:var(--menu-radius);font-size:var(--menu-font);background:var(--menu-row-bg)}

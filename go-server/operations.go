@@ -94,7 +94,7 @@ func requestPlatform(r *http.Request) (string, error) {
 }
 func operationConfig(input M) (M, error) {
 	out := M{}
-	fields := map[string][]string{"sections": {"id", "enabled", "page", "title", "subtitle", "source", "categoryId", "limit", "orderBy", "manualIds", "pageId"}, "serviceMenuItems": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor", "targetType", "url"}, "navigation": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "categories": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "ads": {"id", "name", "slot", "enabled", "media", "asset", "page", "url", "start", "end", "duration", "skipAfter", "frequency"}, "schedule": {"id", "vodId", "title", "date", "categoryId"}}
+	fields := map[string][]string{"sections": {"id", "enabled", "page", "title", "subtitle", "source", "categoryId", "limit", "orderBy", "manualIds", "pageId", "style", "columns", "radius", "gap", "ratio", "showScore", "showNote", "showYear", "showTitle", "showMore", "appearance"}, "serviceMenuItems": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor", "targetType", "url"}, "navigation": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "categories": {"id", "label", "enabled", "page", "categoryId", "pageId", "display", "iconKey", "textColor"}, "ads": {"id", "name", "slot", "enabled", "media", "asset", "page", "url", "start", "end", "duration", "skipAfter", "frequency"}, "schedule": {"id", "vodId", "title", "date", "categoryId"}}
 	for key, keys := range fields {
 		value, exists := input[key]
 		if !exists {
@@ -154,6 +154,9 @@ func operationConfig(input M) (M, error) {
 				}
 			}
 			if key == "sections" {
+				if err := sectionPresentation(n); err != nil {
+					return nil, err
+				}
 				limit := number(n["limit"])
 				if limit < 1 || limit > 60 {
 					return nil, problem(400, "栏目数量须为1–60")
@@ -211,6 +214,15 @@ func operationConfig(input M) (M, error) {
 			clean = append(clean, n)
 		}
 		out[key] = clean
+	}
+	if value, exists := input["serviceMenuStyle"]; exists {
+		style, err := operationAppearance(value, "menu")
+		if err != nil {
+			return nil, err
+		}
+		if len(style) > 0 {
+			out["serviceMenuStyle"] = style
+		}
 	}
 	features := clone(obj(defaults["features"]))
 	for k := range features {
