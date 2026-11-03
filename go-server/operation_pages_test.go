@@ -219,3 +219,50 @@ func TestPrimaryCategorySourceIndependentOfPage(t *testing.T) {
 		}
 	}
 }
+
+func TestPrimaryPageOwnershipApplyRestartAndCleanup(t *testing.T) {
+	cms := fixtureCMS(t)
+	defer cms.Close()
+	h := newHarness(t, cms.URL)
+	draft := pageDraft()
+	obj(arr(draft["contentPages"])[1])["primaryEntryId"] = "movie-nav"
+	w := h.req("PUT", "/api/admin/clients/mobile/apply", M{"version": 1, "theme": draft}, "")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	restarted, err := newApp(context.Background(), h.a.config, h.a.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := bootstrap(restarted.readState(), "mobile", "android", "", h.origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := obj(response["config"])
+	assertPageConfig(t, cfg)
+	if obj(arr(cfg["contentPages"])[1])["primaryEntryId"] != "movie-nav" {
+		t.Fatal("page ownership lost after autosave and restart")
+	}
+	for _, owner := range []string{"missing", "movie-nav"} {
+		stale := pageDraft()
+		obj(arr(stale["contentPages"])[1])["primaryEntryId"] = owner
+		obj(arr(stale["categories"])[0])["pageId"] = "summer"
+		clean, err := operationConfig(stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := obj(arr(clean["contentPages"])[1])["primaryEntryId"]; exists {
+			t.Fatal("stale ownership retained")
+		}
+		if len(arr(clean["contentPages"])) != 4 || len(arr(clean["sections"])) != 3 {
+			t.Fatal("cleanup removed manual contents")
+		}
+	}
+	for _, invalid := range []any{true, "../entry", ""} {
+		bad := pageDraft()
+		obj(arr(bad["contentPages"])[1])["primaryEntryId"] = invalid
+		if _, err := operationConfig(bad); err == nil {
+			t.Fatal("invalid ownership accepted", invalid)
+		}
+	}
+}

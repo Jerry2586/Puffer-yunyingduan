@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var buildVersion = "0.3.16"
+var buildVersion = "0.3.17"
 var errNoState = sql.ErrNoRows
 
 func loadConfig(name string) (config, error) {

@@ -2,12 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {createRequire} from 'node:module';
+import {dependency} from './test-dependencies.mjs';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const localRequire=createRequire(path.join(root,'package.json'));
-const cachedRequire=createRequire(path.join(process.env.LOCALAPPDATA||'', 'Programs/UniAppTools/projects/hetun-app-c7cb6e60b06b/runtime/workspace/package.json'));
-function dependency(name){try{return localRequire(name);}catch{return cachedRequire(name);}}
 const ts=dependency('typescript'),vue=dependency('vue');
 const modules=new Map();
 function domain(file){const full=path.join(root,'src/domain',file);if(modules.has(full))return modules.get(full);if(file.endsWith('.json'))return JSON.parse(fs.readFileSync(full,'utf8'));const out={exports:{}};modules.set(full,out.exports);const js=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;new Function('require','module','exports',js)(name=>domain(name.replace('./','')+(name.endsWith('.json')?'':'.ts')),out,out.exports);return out.exports;}
@@ -149,7 +146,7 @@ function experience(theme){
  const props=vue.reactive({theme,items:[{id:'a',categoryId:'movie'},{id:'b',categoryId:'action'},{id:'c',categoryId:'drama'}],categories,sectionItems:{},page:'home',pageId:'',platform:'mobile',editing:true,studio:true});
  const calls=[],events=[],module={exports:{}};const scope=vue.effectScope();
  const source=fs.readFileSync(path.join(root,'src/components/AppExperience.vue'),'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1].replaceAll('import.meta.env.VITE_HETUN_APP_VERSION','"0.3.15"');
- const js=ts.transpileModule(source+'\nexport {page,scopeRoot,activePrimaryEntryId,middleNav,middleSettings,categoryId,visible,scheduleRows,scopedDiscovery,scopeCategories,message,go,navigate,middleGo,fetchCatalog,bindCategory};',{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
+ const js=ts.transpileModule(source+'\nexport {page,scopeRoot,activePrimaryEntryId,middleNav,middleSettings,categoryId,visible,scheduleRows,scopedDiscovery,scopeCategories,message,go,navigate,middleGo,fetchCatalog,bindCategory,activePageId,sections,contentPage,isHomeContent,operationsSlides,isEntryActive,carouselAction};',{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
  const api={catalog:async(...args)=>{calls.push(args);return {items:props.items,page:1,pages:1};}};
  scope.run(()=>new Function('require','module','exports','defineProps','withDefaults','defineEmits','defineExpose','uni',js)(name=>name==='vue'?{...vue,onMounted:()=>{},onUnmounted:()=>{}}:name.startsWith('@/domain/')?domain(name.slice('@/domain/'.length)+'.ts'):name==='@/services/api'?{api,assetUrl:x=>x,memberApi:{}}:name==='@/services/library'?{getLibrary:()=>[],getHistory:()=>[]}: {},module,module.exports,()=>props,x=>x,()=>((...args)=>events.push(args)),()=>{},{getStorageSync:()=>'',getSystemInfoSync:()=>({platform:'web'})}));
  return {props,calls,events,...module.exports,dispose:()=>scope.stop()};
@@ -263,5 +260,97 @@ test('删除与重新加载分类后列表更新，不修改已移除或未绑�
   p.toggleCategory('anime',true);p.setDisplay('anime','text');assert.deepEqual(p.props.theme.categoryShortcuts,[]);
   p.bindingId.value='new';p.addBinding();await settle();assert.deepEqual(p.categoryRows.value.map(n=>n.entry.id),['new']);
   assert.equal(menuPages.categoryShortcutSettings(p.props.theme,'new').enabled,false);
+ }finally{p.dispose();}
+});
+
+test('栏目独立绑定不会随页面来源改变，改绑和解绑不影响相邻栏目',()=>{
+ const theme=structuredClone(defaults);
+ const page={id:'independent',title:'页面',kind:'category',categoryId:'movie',enabled:true};theme.contentPages=[page];
+ theme.navigation=[{id:'nav',pageId:page.id,page:'category',categoryId:'movie',enabled:true}];
+ theme.sections=[{id:'a',pageId:page.id,source:'category',categoryId:'movie',limit:6,orderBy:'score'},{id:'b',pageId:page.id,source:'category',categoryId:'drama',limit:9,orderBy:'latest'}];
+ const before=structuredClone(theme.sections);
+ menuPages.bindPageCategory(theme,page,'drama');assert.equal(page.categoryId,'drama');assert.equal(theme.navigation[0].categoryId,'drama');assert.deepEqual(theme.sections,before);
+ menuPages.bindPageCategory(theme,page,'');assert.deepEqual(theme.sections,before);
+ const restored=JSON.parse(JSON.stringify(theme));assert.deepEqual(restored.sections,before);
+});
+test('独立栏目读取自身一级分类及子分类，保留排序数量和空绑定边界',()=>{
+ const presentation=domain('presentation.ts');
+ const rows=[{id:'a',categoryId:'movie',score:'7'},{id:'b',categoryId:'action',score:'9'},{id:'c',categoryId:'drama',score:'10'}];
+ const section={id:'a',pageId:'p',source:'category',categoryId:'movie',limit:1,orderBy:'score'};
+ const own=menuPages.sectionRows(section,rows,categories,'drama');assert.deepEqual(own.map(v=>v.id),['a','b']);
+ assert.deepEqual(presentation.moduleItems(section,own,categories).map(v=>v.id),['b']);
+ section.categoryId='drama';assert.deepEqual(menuPages.sectionRows(section,rows,categories,'movie').map(v=>v.id),['c']);
+ section.categoryId='';assert.deepEqual(menuPages.sectionRows(section,rows,categories,'movie'),[]);
+ assert.deepEqual(menuPages.sectionRows({...section,pageId:undefined,categoryId:'movie'},rows,categories,'',true),[]);
+ assert.deepEqual(menuPages.sectionRows({...section,categoryId:'movie'},rows,categories,'',true).map(v=>v.id),['a','b']);
+ section.categoryId='movie';section.orderBy='manual';section.manualIds='c,b,a';section.limit=6;
+ assert.deepEqual(presentation.moduleItems(section,rows,categories).map(v=>v.id),['b','a']);
+});
+
+
+function setupEditor(component,theme,fields,extra={}){
+ const props=vue.reactive({theme,categories,loadCategories:async()=>categories,active:'',page:'home',pageId:'',...extra});
+ const events=[],modals=[],module={exports:{}},scope=vue.effectScope();
+ const source=fs.readFileSync(path.join(root,'src/components',component+'.vue'),'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1];
+ const js=ts.transpileModule(source+'\nexport {'+fields+'};',{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
+ scope.run(()=>new Function('require','module','exports','defineProps','defineEmits','uni',js)(name=>name==='vue'?vue:name.startsWith('@/domain/')?domain(name.slice('@/domain/'.length)+'.ts'):{},module,module.exports,()=>props,()=>((...args)=>events.push(args)),{showModal:x=>modals.push(x)}));
+ return {props,events,modals,...module.exports,dispose:()=>scope.stop()};
+}
+test('一级分类自动建独立页面，同 CMS 不共享页面，旧首页内容仅迁移一次',()=>{
+ const theme=primaryTheme();theme.contentPages=[];
+ theme.sections=[{id:'legacy-home',page:'home',enabled:true},{id:'other-route',page:'ranking',enabled:true}];
+ theme.carousel.slides=[{id:'old-banner',page:'home',image:'hero.jpg'}];
+ assert.equal(menuPages.ensurePrimaryContentPages(theme),3);
+ const [anime,featured,home]=theme.categories.map(n=>menuPages.findContentPage(theme,n.pageId));
+ assert.notEqual(anime.id,featured.id);assert.equal(anime.primaryEntryId,'anime');assert.equal(anime.categoryId,'movie');
+ assert.equal(home.kind,'custom');assert.equal(theme.sections[0].pageId,home.id);assert.equal(theme.sections[1].pageId,undefined);assert.equal(theme.carousel.slides[0].pageId,home.id);
+ assert.equal(menuPages.ensurePrimaryContentPages(theme),0);assert.equal(theme.contentPages.length,3);assert.equal(theme.sections.length,2);
+});
+test('原有手工绑定、独立栏目和页面名称在自动建页及 CMS 改绑后保留',()=>{
+ const theme=primaryTheme();theme.contentPages=[{id:'manual',title:'手工页面',kind:'campaign',enabled:true,categoryId:''}];theme.categories[1].pageId='manual';
+ theme.sections=[{id:'own-column',pageId:'manual',categoryId:'drama',enabled:true}];
+ assert.equal(menuPages.ensurePrimaryContentPages(theme),2);assert.equal(theme.categories[1].pageId,'manual');assert.equal(theme.contentPages[0].primaryEntryId,undefined);
+ const entry=theme.categories[0],page=menuPages.findContentPage(theme,entry.pageId);
+ theme.sections.push({id:'anime-column',pageId:page.id,categoryId:'action',enabled:true});
+ menuPages.renamePrimaryEntry(theme,entry,'');menuPages.renamePrimaryEntry(theme,entry,'新动漫');assert.equal(page.title,'新动漫');
+ page.title='我的独立标题';menuPages.renamePrimaryEntry(theme,entry,'再次改名');assert.equal(page.title,'我的独立标题');
+ menuPages.bindPrimaryCategory(theme,entry,'drama');assert.equal(page.categoryId,'drama');assert.equal(theme.sections[1].categoryId,'action');
+ page.categoryId='action';menuPages.bindPrimaryCategory(theme,entry,'movie');assert.equal(page.categoryId,'action');
+ menuPages.bindPage(theme,entry,'manual');assert.equal(page.primaryEntryId,undefined);assert.equal(theme.sections.length,2);assert.equal(theme.contentPages[0].title,'手工页面');
+});
+test('实际导航编辑器新建即关联页面，删除保留内容，页面满额时拒绝孤立分类',()=>{
+ const theme=primaryTheme();theme.contentPages=[];
+ const e=setupEditor('OperationsNavigationEditor',theme,'add,remove,renameEntry,bindCategory,selectedId');
+ try{
+  e.add();const entry=e.props.theme.categories.at(-1),page=menuPages.findContentPage(e.props.theme,entry.pageId);
+  assert.equal(page.primaryEntryId,entry.id);assert.equal(entry.enabled,false);assert.equal(e.selectedId.value,entry.id);
+  e.renameEntry('测试分类');e.bindCategory(entry,'drama');assert.equal(page.title,'测试分类');assert.equal(page.categoryId,'drama');
+  e.props.theme.sections.push({id:'keep',pageId:page.id,enabled:true});e.remove(entry);e.modals.pop().success({confirm:true});
+  assert.ok(!e.props.theme.categories.some(n=>n.id===entry.id));assert.ok(e.props.theme.contentPages.some(p=>p.id===page.id));assert.equal(page.primaryEntryId,undefined);assert.ok(e.props.theme.sections.some(s=>s.id==='keep'));
+  while(e.props.theme.contentPages.length<40)e.props.theme.contentPages.push({id:'full-'+e.props.theme.contentPages.length,title:'保留页',kind:'custom',enabled:true});
+  const count=e.props.theme.categories.length;e.add();assert.equal(e.props.theme.categories.length,count);assert.equal(e.props.theme.contentPages.length,40);assert.match(e.events.at(-1)[1],/40/);
+ }finally{e.dispose();}
+});
+test('页面编排默认选自动首页，栏目及轮播按 APP 页面独立展示',async()=>{
+ const theme=primaryTheme();theme.contentPages=[];menuPages.ensurePrimaryContentPages(theme);
+ theme.sections=[{id:'anime-list',pageId:theme.categories[0].pageId,enabled:true},{id:'home-list',pageId:theme.categories[2].pageId,enabled:true}];
+ theme.carouselGroups=[{id:'anime-hero',entryIds:['anime'],enabled:true,slides:[]},{id:'featured-hero',entryIds:['featured'],enabled:true,slides:[]}];
+ const e=setupEditor('OperationsPagesEditor',theme,'currentPageId,current,modules,boundCarousels,pageOptions,selectedPage');
+ try{
+  assert.equal(e.currentPageId.value,theme.categories[2].pageId);assert.deepEqual(e.modules.value.map(s=>s.id),['home-list']);assert.ok(e.pageOptions.value.every(p=>p.id!=='route:home'));
+  e.props.page='category';e.props.pageId=theme.categories[0].pageId;await settle();assert.deepEqual(e.modules.value.map(s=>s.id),['anime-list']);assert.deepEqual(e.boundCarousels.value.map(g=>g.id),['anime-hero']);
+  e.props.pageId=theme.categories[1].pageId;await settle();assert.equal(e.modules.value.length,0);assert.deepEqual(e.boundCarousels.value.map(g=>g.id),['featured-hero']);
+ }finally{e.dispose();}
+});
+test('APP 首页与底部首页保持一致，分类切换使用各自页面和轮播关闭状态',async()=>{
+ const theme=primaryTheme();theme.contentPages=[];menuPages.ensurePrimaryContentPages(theme);
+ theme.carouselGroups=[{id:'anime-hero',entryIds:['anime'],enabled:true,slides:[{id:'a',enabled:true,target:{type:'system',page:'home'}}]},{id:'featured-hero',entryIds:['featured'],enabled:false,slides:[{id:'b',enabled:true}]}];
+ theme.sections=[{id:'anime-only',pageId:theme.categories[0].pageId,enabled:true}];
+ const p=experience(theme);try{
+  const home=p.props.theme.navigation.find(n=>n.page==='home');assert.equal(p.activePageId.value,theme.categories[2].pageId);assert.equal(p.isHomeContent.value,true);assert.equal(p.isEntryActive(home),true);
+  p.navigate(p.props.theme.categories[0]);await settle();assert.equal(p.activePageId.value,theme.categories[0].pageId);assert.deepEqual(p.sections.value.map(s=>s.id),['anime-only']);assert.equal(p.operationsSlides.value[0].id,'a');assert.equal(p.isHomeContent.value,false);
+  p.navigate(p.props.theme.categories[1]);await settle();assert.deepEqual([...p.operationsSlides.value],[]);assert.equal(p.sections.value.length,0);
+  p.carouselAction({type:'page',pageId:theme.categories[0].pageId});await settle();assert.equal(p.activePageId.value,theme.categories[0].pageId);
+  p.navigate(home);await settle();assert.equal(p.activePageId.value,theme.categories[2].pageId);assert.equal(p.isHomeContent.value,true);assert.equal(p.isEntryActive(home),true);
  }finally{p.dispose();}
 });

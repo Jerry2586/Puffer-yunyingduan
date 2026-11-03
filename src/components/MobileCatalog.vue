@@ -5,7 +5,7 @@ import type {Theme,Vod,Category,Section,AppPage} from '@/domain/types';
 import {assetUrl} from '@/services/api';
 import FilmModule from './FilmModule.vue';
 import AppEmptyState from './AppEmptyState.vue';
-const props=defineProps<{theme:Theme;page:AppPage;items:Vod[];discovery:Vod[];categories:Category[];categoryId:string;query:string;attempted:boolean;loading:boolean;error:string;sections:Section[];sectionItems:Record<string,Vod[]>;editing?:boolean;selected?:string}>();
+const props=defineProps<{theme:Theme;page:AppPage;items:Vod[];discovery:Vod[];categories:Category[];moduleCategories?:Category[];categoryId:string;query:string;attempted:boolean;loading:boolean;error:string;sections:Section[];sectionItems:Record<string,Vod[]>;editing?:boolean;selected?:string}>();
 const emit=defineEmits<{category:[id:string];search:[query:string];open:[film:Vod];play:[film:Vod];episode:[film:Vod,index:number];select:[id:string];more:[section:Section]}>();
 const sort=ref('latest'),area=ref(''),year=ref('');
 const history=ref<string[]>([]);
@@ -46,8 +46,8 @@ function clearHistory(){history.value=[];uni.removeStorageSync('hetun-search-his
    <AppEmptyState v-if="!list.length" title="没有找到相关影片" description="试试其他片名或关键词" icon="search"/>
   </view>
   <template v-else-if="!loading&&!error">
-   <FilmModule v-for="s in sections" :key="s.id" :theme="theme" :section="s" :items="sectionItems[s.id]||list" :editing="editing" :selected="selected===s.id" @open="emit('open',$event)" @select="emit('select',$event)" @more="emit('more',$event)"/>
-   <FilmModule v-if="!sections.length" :theme="theme" :section="generic" :items="list" @open="emit('open',$event)"/>
+   <FilmModule :categories="moduleCategories||categories" v-for="s in sections" :key="s.id" :theme="theme" :section="s" :items="sectionItems[s.id]||list" :editing="editing" :selected="selected===s.id" @open="emit('open',$event)" @select="emit('select',$event)" @more="emit('more',$event)"/>
+   <FilmModule :categories="moduleCategories||categories" v-if="!sections.length" :theme="theme" :section="generic" :items="list" @open="emit('open',$event)"/>
   </template>
  </view>
 </template>

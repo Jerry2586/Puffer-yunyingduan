@@ -36,7 +36,7 @@ func operationPages(input, out M) error {
 		if !has([]string{"category", "campaign", "blank", "custom"}, kind) {
 			return problem(400, "独立页面类型无效")
 		}
-		n := pick(page, "id", "title", "kind", "categoryId", "enabled", "carouselEnabled")
+		n := pick(page, "id", "title", "kind", "categoryId", "enabled", "carouselEnabled", "primaryEntryId")
 		if _, exists := n["categoryId"]; !exists {
 			n["categoryId"] = ""
 		}
@@ -53,6 +53,12 @@ func operationPages(input, out M) error {
 		}
 		if kind != "category" && str(n["categoryId"]) != "" {
 			return problem(400, "只有分类页面可以绑定主分类")
+		}
+		if value, exists := n["primaryEntryId"]; exists {
+			owner, ok := value.(string)
+			if !ok || !idPattern.MatchString(owner) {
+				return problem(400, "页面所属一级分类编号无效")
+			}
 		}
 		byID[id] = n
 		clean = append(clean, n)
@@ -94,6 +100,25 @@ func operationPages(input, out M) error {
 			if (key == "sections" || key == "carousel") && target["kind"] == "blank" {
 				return problem(400, "空白页不能包含栏目或轮播内容，请先改为自定义页面")
 			}
+		}
+	}
+	// Ownership metadata only synchronizes automatically created pages. Manual pages stay intact.
+	for _, raw := range clean {
+		page := obj(raw)
+		owner := str(page["primaryEntryId"])
+		if owner == "" {
+			continue
+		}
+		linked := false
+		for _, entry := range arr(out["categories"]) {
+			category := obj(entry)
+			if str(category["id"]) == owner && str(category["pageId"]) == str(page["id"]) {
+				linked = true
+				break
+			}
+		}
+		if !linked {
+			delete(page, "primaryEntryId")
 		}
 	}
 	style := M{}

@@ -70,8 +70,9 @@ jobs:
         run: node deploy/operations/build.mjs
       - name: Verify installation, CMS and published runtime
         env:
+          HETUN_UNI_DEPS: ${{ runner.temp }}/hetun-ops-dependencies/node_modules
           HETUN_OPERATIONS_BUILD_INFO: ${{ runner.temp }}/hetun-ops-build/latest-build.json
-        run: node --test deploy/operations/integration.test.mjs
+        run: node --test deploy/operations/regression.test.mjs deploy/operations/integration.test.mjs
 
       - name: Save verified installation bundles
         uses: actions/upload-artifact@v4

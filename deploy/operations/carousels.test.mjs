@@ -2,12 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {createRequire} from 'node:module';
+import {dependency} from './test-dependencies.mjs';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const local=createRequire(path.join(root,'package.json'));
-const cached=createRequire(path.join(process.env.LOCALAPPDATA||'','Programs/UniAppTools/projects/hetun-app-c7cb6e60b06b/runtime/workspace/package.json'));
-const dependency=name=>{try{return local(name);}catch{return cached(name);}};
 const ts=dependency('typescript'),vue=dependency('vue'),modules=new Map();
 function domain(file){
  const full=path.join(root,'src/domain',file);if(modules.has(full))return modules.get(full);
@@ -161,5 +158,33 @@ test('表格条目排序、隐藏和删除独立，自动保存回填后保留�
   e.toggleSlide(g,g.slides[0],false);assert.equal(JSON.stringify(g.slides[0]),secondContent);
   e.removeSlide(g,g.slides[0]);rehydrate(e);e.modals.pop().success({confirm:true});g=record(e);
   assert.deepEqual(g.slides.map(s=>s.id),[firstId]);assert.equal(g.slides[0].title,'展示影片');assert.equal(g.enabled,true);
+ }finally{e.dispose();}
+});
+
+
+function carouselRuntime(theme,operationsSlides,api){
+ const props=vue.reactive({theme,items:[],editing:true,operationsSlides});const events=[],cleanup=[],module={exports:{}},scope=vue.effectScope();
+ const source=fs.readFileSync(path.join(root,'src/components/ThemeCarousel.vue'),'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1];
+ const js=ts.transpileModule(source+'\nexport {rows,open};',{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
+ scope.run(()=>new Function('require','module','exports','defineProps','defineEmits',js)(name=>name==='vue'?{...vue,onUnmounted:fn=>cleanup.push(fn)}:name==='@/services/api'?{api,assetUrl:x=>x}:{},module,module.exports,()=>props,()=>((...args)=>events.push(args))));
+ return {props,events,...module.exports,dispose:()=>{cleanup.forEach(fn=>fn());scope.stop();}};
+}
+test('分类轮播展示源与点击目标分离，隐藏条目不请求，空组不回退旧轮播',async()=>{
+ const theme=fixture(),calls=[];theme.carousel.slides=[{id:'legacy',title:'旧图',page:'home',vodId:'old'}];
+ const slides=[{id:'display',title:'',image:'',sourceVodId:'12',enabled:true,target:{type:'vod',vodId:'34'}},{id:'hidden',sourceVodId:'99',enabled:false,target:{type:'vod',vodId:'99'}}];
+ const e=carouselRuntime(theme,slides,{catalog:async(...args)=>{calls.push(args);return {items:[{id:'12',title:'展示影片',poster:'display.jpg'}]};}});
+ try{
+  await vue.nextTick();await Promise.resolve();assert.equal(calls[0][3],'12');assert.equal(e.rows.value.length,1);assert.equal(e.rows.value[0].title,'展示影片');assert.equal(e.rows.value[0].image,'display.jpg');
+  e.props.editing=false;e.open(e.rows.value[0]);assert.equal(e.events.at(-1)[0],'action');assert.equal(e.events.at(-1)[1].vodId,'34');
+  e.props.operationsSlides=[];await vue.nextTick();assert.equal(e.rows.value.length,0);
+  e.props.operationsSlides=undefined;await vue.nextTick();assert.equal(e.rows.value[0].id,'legacy');
+ }finally{e.dispose();}
+});
+test('轮播分类切换后旧影片请求不能覆盖新页面展示内容',async()=>{
+ const theme=fixture(),requests=[];const slide=id=>({id:'banner-'+id,title:'',image:'',sourceVodId:id,enabled:true,target:{type:'vod',vodId:id}});
+ const e=carouselRuntime(theme,[slide('12')],{catalog:()=>new Promise(resolve=>requests.push(resolve))});
+ try{
+  e.props.operationsSlides=[slide('34')];await vue.nextTick();requests[1]({items:[{id:'34',title:'新页面影片',poster:'new.jpg'}]});await Promise.resolve();
+  requests[0]({items:[{id:'12',title:'旧页面影片',poster:'old.jpg'}]});await Promise.resolve();assert.equal(e.rows.value[0].title,'新页面影片');assert.equal(e.rows.value[0].image,'new.jpg');
  }finally{e.dispose();}
 });

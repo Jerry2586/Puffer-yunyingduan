@@ -1,4 +1,4 @@
-import type {AppPage, Category, CategoryShortcut, CategoryShortcutLayout, ContentPage, NavItem, Section, Theme, MenuTargetType} from './types';
+import type {AppPage, Category, CategoryShortcut, CategoryShortcutLayout, ContentPage, NavItem, Section, Theme, Vod, MenuTargetType} from './types';
 
 export const pageKinds = [
  {id:'category',label:'分类内容页'}, {id:'campaign',label:'活动页'},
@@ -18,6 +18,54 @@ export function menuExternalUrl(value?:string){
 }
 export function pageRoute(page:ContentPage):AppPage {return page.kind==='category'?'category':'home';}
 export function findContentPage(theme:Theme,id?:string){return theme.contentPages?.find(p=>p.id===id);}
+// Generated pages belong to APP entries, never to CMS IDs (which may be shared).
+export function ensurePrimaryContentPage(theme:Theme,entry:NavItem):ContentPage|undefined {
+ if(entry.pageId)return findContentPage(theme,entry.pageId);
+ if(!['home','category'].includes(entry.page))return;
+ const pages=theme.contentPages||(theme.contentPages=[]);
+ if(pages.length>=40)return;
+ const base=('primary-'+entry.id).slice(0,60);let id=base,index=2;
+ while(pages.some(p=>p.id===id))id=base+'-'+index++;
+ const legacyHome=entry.page==='home'&&theme.categories.find(n=>n.page==='home')?.id===entry.id;
+ const page:ContentPage={id,title:entry.label,kind:entry.page==='home'?'custom':'category',categoryId:entry.page==='home'?'':entry.categoryId,enabled:true,carouselEnabled:true,primaryEntryId:entry.id};
+ pages.push(page);bindPage(theme,entry,id);
+ // Keep existing homepage columns/artwork on their original homepage, without cloning them.
+ if(legacyHome){
+  for(const section of theme.sections)if(!section.pageId&&(section.page||'home')==='home')section.pageId=id;
+  for(const slide of theme.carousel.slides)if(!slide.pageId&&(slide.page||'home')==='home')slide.pageId=id;
+ }
+ return page;
+}
+export function ensurePrimaryContentPages(theme:Theme){
+ let created=0;
+ for(const entry of theme.categories)if(!entry.pageId&&['home','category'].includes(entry.page)&&ensurePrimaryContentPage(theme,entry))created++;
+ return created;
+}
+export function homeContentPage(theme:Theme,editing=false){
+ const entry=theme.categories.find(n=>n.page==='home'&&n.pageId&&(editing||entryVisible(theme,n)));
+ return entry?findContentPage(theme,entry.pageId):undefined;
+}
+export function renamePrimaryEntry(theme:Theme,entry:NavItem,label:string){
+ const page=findContentPage(theme,entry.pageId);
+ if(page?.primaryEntryId===entry.id&&page.title===entry.label)page.title=label;
+ entry.label=label;
+}
+export function bindPrimaryCategory(theme:Theme,entry:NavItem,categoryId:string){
+ migrateCategoryShortcutOwners(theme);
+ const page=findContentPage(theme,entry.pageId),previous=entry.categoryId;
+ entry.categoryId=categoryId;
+ if(page?.primaryEntryId===entry.id&&page.kind==='category'&&page.categoryId===previous)bindPageCategory(theme,page,categoryId);
+}
+export function detachPrimaryPage(theme:Theme,entry:NavItem){
+ for(const page of theme.contentPages||[])if(page.primaryEntryId===entry.id)delete page.primaryEntryId;
+}
+export function pageCarouselGroups(theme:Theme,pageId=''){
+ const owners=new Set(theme.categories.filter(n=>pageId?n.pageId===pageId:!n.pageId&&n.page==='home').map(n=>n.id));
+ return (theme.carouselGroups||[]).filter(g=>g.entryIds.some(id=>owners.has(id)));
+}
+export function pageCarouselGroup(theme:Theme,pageId='',entryId=''){
+ return entryId?(theme.carouselGroups||[]).find(g=>g.entryIds.includes(entryId)):pageCarouselGroups(theme,pageId)[0];
+}
 export function entryVisible(theme:Theme,entry:NavItem){return entry.enabled&&(!entry.pageId||findContentPage(theme,entry.pageId)?.enabled===true);}
 export function entryActive(entry:NavItem,page:AppPage,pageId=''){return pageId?entry.pageId===pageId:!entry.pageId&&entry.page===page;}
 export function pageSections(theme:Theme,page:AppPage,pageId=''):Section[]{
@@ -25,17 +73,18 @@ export function pageSections(theme:Theme,page:AppPage,pageId=''):Section[]{
  return theme.sections.filter(s=>s.enabled&&(pageId?s.pageId===pageId:!s.pageId&&(s.page||'home')===page));
 }
 export function bindPage(theme:Theme,entry:NavItem,id:string){
- if(!id){delete entry.pageId;return;}
+ if(!id){detachPrimaryPage(theme,entry);delete entry.pageId;return;}
  const page=findContentPage(theme,id);if(!page)return;
+ if(theme.categories.includes(entry)&&entry.pageId&&entry.pageId!==id)detachPrimaryPage(theme,entry);
  if(theme.serviceMenuItems?.includes(entry)){entry.targetType='page';delete entry.url;}
  entry.pageId=id;entry.page=pageRoute(page);
  // Primary category sources belong to the entry, independently of its destination page.
  if(!theme.categories.includes(entry))entry.categoryId=page.categoryId;
 }
 export function bindPageCategory(theme:Theme,page:ContentPage,categoryId:string){
- const old=page.categoryId;page.categoryId=categoryId;
+ page.categoryId=categoryId;
  for(const entry of [...theme.navigation,...(theme.serviceMenuItems||[])])if(entry.pageId===page.id)entry.categoryId=categoryId;
- for(const section of theme.sections)if(section.pageId===page.id&&section.categoryId===old){section.categoryId=categoryId;section.source=categoryId||page.kind==='category'?'category':'latest';}
+ // Columns own their CMS binding; changing the page source must preserve each column.
 }
 // Deleting a navigation entry or destination must never strand an invalid autosave.
 export function reconcileCarouselReferences(theme:Theme,removedPageId?:string){
@@ -121,3 +170,10 @@ export function navigationArtwork(theme:Theme,entry:{id:string;iconKey?:string;i
  return active?(source.activeIcon||source.icon||''):(source.icon||'');
 }
 export function navigationIcon(page:string){return ({library:'favorite',disclaimer:'shield',privacy:'shield',about:'info'} as Record<string,string>)[page]||(['home','category','search','ranking','schedule','shortdrama','mine','member','history','settings'].includes(page)?page:'category');}
+
+// An explicit column source takes precedence over the owning page's category.
+export function sectionRows(section:Section|undefined,rows:Vod[],categories:Category[],root:string,unbound=false):Vod[]{
+ if(unbound&&!section?.pageId)return [];
+ if(section?.source==='category')return section.categoryId?rows.filter(row=>categoryContains(categories,section.categoryId,row.categoryId)):[];
+ return unbound?[]:rows.filter(row=>categoryContains(categories,root,row.categoryId));
+}

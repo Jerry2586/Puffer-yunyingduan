@@ -2,12 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {createRequire} from 'node:module';
+import {dependency} from './test-dependencies.mjs';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const local=createRequire(path.join(root,'package.json'));
-const cached=createRequire(path.join(process.env.LOCALAPPDATA,'Programs/UniAppTools/projects/hetun-app-c7cb6e60b06b/runtime/workspace/package.json'));
-let ts;try{ts=local('typescript');}catch{ts=cached('typescript');}
+const ts=dependency('typescript');
 const mod={exports:{}};
 new Function('module','exports',ts.transpileModule(fs.readFileSync(path.join(root,'src/domain/operations-autosave.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(mod,mod.exports);
 const {createOperationsAutosave}=mod.exports;

@@ -71,8 +71,9 @@ jobs:
         run: node deploy/go/build.mjs
       - name: Verify compiled application
         env:
+          HETUN_UNI_DEPS: ${{ runner.temp }}/hetun-ops-dependencies/node_modules
           HETUN_OPERATIONS_BUILD_INFO: ${{ runner.temp }}/hetun-ops-release/latest-build.json
-        run: node --test deploy/operations/integration.test.mjs
+        run: node --test deploy/operations/regression.test.mjs deploy/operations/integration.test.mjs
       - name: Publish verified binaries and checksums
         env:
           GH_TOKEN: ${{ github.token }}
