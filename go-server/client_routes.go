@@ -21,6 +21,8 @@ func clientName(p string) string {
 }
 
 var publicClientRoutes = map[string]string{
+	"application/config": "/api/application/config", "application/captcha": "/api/application/captcha", "member/history": "/api/member/history", "member/avatar": "/api/member/avatar", "member/invitation": "/api/member/invitation", "playback/danmu": "/api/playback/danmu",
+	"community/comments": "/api/community/comments", "community/comments/report": "/api/community/comments/report", "community/danmu": "/api/community/danmu", "community/danmu/report": "/api/community/danmu/report", "community/requests": "/api/community/requests", "community/feedback": "/api/community/feedback", "community/reminders": "/api/community/reminders",
 	"playback/config": "/api/playback/config", "playback/negotiate": "/api/playback/negotiate", "playback/report": "/api/playback/report",
 	"bootstrap": "/api/client/bootstrap", "catalog": "/api/catalog", "catalog/categories": "/api/catalog/categories", "playback": "/api/playback",
 	"member/config": "/api/member/config", "member/plans": "/api/member/plans", "member/profile": "/api/member/profile", "member/orders": "/api/member/orders", "member/order": "/api/member/order",

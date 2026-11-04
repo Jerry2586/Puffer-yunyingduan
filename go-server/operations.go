@@ -259,29 +259,11 @@ func operationConfig(input M) (M, error) {
 		return nil, problem(400, "强制更新需填写版本和下载地址")
 	}
 	out["clientSettings"] = settings
-	ann := clone(obj(defaults["announcement"]))
-	for _, k := range []string{"enabled", "text", "title", "image", "frequency", "actionLabel", "page", "url"} {
-		if v, ok := obj(input["announcement"])[k]; ok {
-			ann[k] = v
-		}
+	ann, err := announcementConfig(obj(input["announcement"]))
+	if err != nil {
+		return nil, err
 	}
-	if _, ok := ann["enabled"].(bool); !ok {
-		return nil, problem(400, "公告开关格式无效")
-	}
-	for _, key := range []string{"text", "title", "image", "frequency", "actionLabel", "page", "url"} {
-		if _, ok := ann[key].(string); !ok {
-			return nil, problem(400, "公告文字格式无效")
-		}
-	}
-	if !has([]string{"launch", "daily", "once"}, str(ann["frequency"])) || !has(pages, str(ann["page"])) {
-		return nil, problem(400, "公告频率或页面无效")
-	}
-	out["announcement"] = pick(ann, "enabled", "text", "title", "image", "frequency", "actionLabel", "page", "url")
-	for _, k := range []string{"image", "url"} {
-		if !asset(str(ann[k])) {
-			return nil, problem(400, "公告地址无效")
-		}
-	}
+	out["announcement"] = ann
 	slides := arr(obj(input["carousel"])["slides"])
 	if len(slides) > 20 {
 		return nil, problem(400, "轮播最多20项")
@@ -352,7 +334,7 @@ func mergeOperations(config M) M {
 	return out
 }
 func initialState() state {
-	v := state{UpdatedAt: now(), Operations: map[string]*record{}, Setup: M{}, Revision: 1}
+	v := state{Announcements: &announcementState{Version: 1, UpdatedAt: now(), Items: []announcementEntry{}}, UpdatedAt: now(), Operations: map[string]*record{}, Setup: M{}, Revision: 1}
 	config, err := operationConfig(defaults)
 	if err != nil {
 		panic(err)
@@ -368,11 +350,11 @@ func studio(v state, p string) M {
 	active := M{}
 	for _, key := range platforms {
 		r := v.Operations[key]
-		templates = append(templates, M{"id": "runtime-" + key, "name": names[key] + "端运营配置", "platform": key, "version": r.Version, "publishedVersion": r.PublishedVersion, "draft": mergeOperations(r.Draft), "published": mergeOperations(r.Published)})
+		templates = append(templates, M{"id": "runtime-" + key, "name": names[key] + "端运营配置", "platform": key, "version": r.Version, "publishedVersion": r.PublishedVersion, "draft": withSharedAnnouncement(v, mergeOperations(r.Draft)), "published": withSharedAnnouncement(v, mergeOperations(r.Published))})
 		active[key] = "runtime-" + key
 	}
 	r := v.Operations[p]
-	out := M{"templates": templates, "activeTemplates": active, "selectedTemplate": "runtime-" + p, "cmsBase": v.CMSBase, "updatedAt": v.UpdatedAt, "publishedAt": r.PublishedAt, "contract": contract, "version": r.Version, "publishedVersion": r.PublishedVersion, "draft": mergeOperations(r.Draft), "published": mergeOperations(r.Published)}
+	out := M{"templates": templates, "activeTemplates": active, "selectedTemplate": "runtime-" + p, "cmsBase": v.CMSBase, "updatedAt": v.UpdatedAt, "publishedAt": r.PublishedAt, "contract": contract, "version": r.Version, "publishedVersion": r.PublishedVersion, "draft": withSharedAnnouncement(v, mergeOperations(r.Draft)), "published": withSharedAnnouncement(v, mergeOperations(r.Published))}
 	history := []any{}
 	for _, h := range r.History {
 		history = append(history, M{"version": h.Version, "publishedAt": h.PublishedAt})
@@ -405,7 +387,7 @@ func mutateOperations(v *state, input M, action string) error {
 		if !ok {
 			return problem(400, "运营配置必须为对象")
 		}
-		clean, e := operationConfig(m)
+		clean, e := operationConfig(withSharedAnnouncement(*v, m))
 		if e != nil {
 			return e
 		}
@@ -431,8 +413,9 @@ func mutateOperations(v *state, input M, action string) error {
 			if found == nil {
 				return problem(404, "历史版本不存在")
 			}
-			r.Draft = clone(found)
+			r.Draft = withSharedAnnouncement(*v, found)
 		}
+		r.Draft = withSharedAnnouncement(*v, r.Draft)
 		publishOperations(r)
 		r.Version++
 	default:
@@ -463,7 +446,7 @@ func bootstrap(v state, p, os, version, origin string) (M, error) {
 		return nil, problem(400, "客户端版本必须为三段数字")
 	}
 	r := v.Operations[p]
-	config := clone(r.Published)
+	config := withSharedAnnouncement(v, r.Published)
 	settings := obj(config["clientSettings"])
 	applyAppRelease(v, p, os, settings)
 	download := ""
@@ -483,6 +466,19 @@ func bootstrap(v state, p, os, version, origin string) (M, error) {
 	return M{"schemaVersion": 1, "contract": contract, "themeContract": "hetun-runtime-v1", "platform": p, "os": os, "version": r.PublishedVersion, "publishedAt": r.PublishedAt, "config": config, "serviceBase": origin, "pollSeconds": 15, "cmsConfigured": v.CMSBase != "", "update": M{"available": available, "required": available && settings["forceUpdate"] == true, "version": settings["latestVersion"], "notes": settings["updateNotes"], "url": download, "browserUrl": settings["browserUrl"], "sizeMB": settings["sizeMB"], "releaseId": settings["releaseId"]}}, nil
 }
 func validateState(v state) error {
+	if v.ApplicationSettings != nil {
+		if e := validateApplicationConfig(v.ApplicationSettings.Config); e != nil {
+			return e
+		}
+	}
+	if v.PlaybackPreferences != nil {
+		if e := validatePlaybackPreferences(*v.PlaybackPreferences); e != nil {
+			return e
+		}
+	}
+	if err := validateAnnouncements(v.Announcements); err != nil {
+		return err
+	}
 	if v.PlaybackEngines != nil {
 		if e := validateEngineConfig(v.PlaybackEngines.Draft, false); e != nil {
 			return e

@@ -13,9 +13,9 @@ func operationCarousels(input, out M) error {
 	if !ok || len(groups) > 40 {
 		return problem(400, "轮播组须为数组，最多40组")
 	}
-	entries, pageIDs := map[string]bool{}, map[string]bool{}
+	entries, pageIDs := map[string]string{}, map[string]bool{}
 	for _, raw := range arr(out["categories"]) {
-		entries[str(obj(raw)["id"])] = true
+		entries[str(obj(raw)["id"])] = str(obj(raw)["label"])
 	}
 	for _, raw := range arr(out["contentPages"]) {
 		pageIDs[str(obj(raw)["id"])] = true
@@ -47,11 +47,29 @@ func operationCarousels(input, out M) error {
 		ids := []any{}
 		for _, rawID := range bindings {
 			entry, ok := rawID.(string)
-			if !ok || !entries[entry] || owners[entry] {
+			if !ok || !carouselEntryExists(entries, entry) || owners[entry] {
 				return problem(400, "轮播须绑定已创建的 APP 一级分类，一个分类只能绑定一组")
 			}
 			owners[entry] = true
 			ids = append(ids, entry)
+		}
+		label := ""
+		if len(ids) > 0 {
+			label = entries[str(ids[0])]
+		}
+		automatic := carouselDefaultName(label)
+		mode, specified := group["nameMode"]
+		if !specified {
+			mode = "custom"
+			if strings.TrimSpace(name) == "新轮播组" || strings.TrimSpace(name) == automatic {
+				mode = "auto"
+			}
+		}
+		if mode != "auto" && mode != "custom" {
+			return problem(400, "轮播组名称模式无效")
+		}
+		if mode == "auto" {
+			name = automatic
 		}
 		rows, ok := group["slides"].([]any)
 		if !ok || len(rows) > 20 {
@@ -109,10 +127,31 @@ func operationCarousels(input, out M) error {
 		if enabled && len(ids) == 0 {
 			return problem(400, "开启轮播组前，请绑定一级分类")
 		}
-		clean = append(clean, M{"id": id, "name": name, "enabled": enabled, "entryIds": ids, "slides": slides})
+		clean = append(clean, M{"id": id, "name": name, "nameMode": mode, "enabled": enabled, "entryIds": ids, "slides": slides})
 	}
 	out["carouselGroups"] = clean
 	return nil
+}
+
+func carouselEntryExists(entries map[string]string, id string) bool {
+	_, exists := entries[id]
+	return exists
+}
+
+func carouselDefaultName(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "新轮播组"
+	}
+	prefix, count := "", 0
+	for _, char := range label {
+		if count == 77 || len(prefix)+len(string(char)) > 231 {
+			break
+		}
+		prefix += string(char)
+		count++
+	}
+	return prefix + "轮播组"
 }
 
 func carouselDestination(raw any, required bool, pageIDs map[string]bool) (M, error) {

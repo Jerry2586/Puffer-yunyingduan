@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"golang.org/x/crypto/scrypt"
 	"io"
 	"io/fs"
@@ -60,6 +61,7 @@ type attempt struct {
 	Start time.Time
 }
 type memberSession struct {
+	UserID         int
 	ProfileVersion atomic.Uint64
 	Jar            http.CookieJar
 	Until          time.Time
@@ -78,6 +80,7 @@ type app struct {
 	cache         *contentCache
 	cms           *http.Client
 	sessions      map[string]adminSession
+	captchas      map[string]captchaChallenge
 	attempts      map[string]attempt
 	members       map[string]*memberSession
 	checkouts     map[string]checkout
@@ -148,6 +151,16 @@ func newApp(ctx context.Context, c config, s store) (*app, error) {
 	migrateAppReleases(&v)
 	if e = validateState(v); e != nil {
 		return nil, e
+	}
+	if migrateAnnouncements(&v) {
+		if e = validateState(v); e != nil {
+			return nil, e
+		}
+		old := v.Revision
+		v.Revision++
+		if e = s.Save(ctx, v, old); e != nil {
+			return nil, fmt.Errorf("保存共享公告迁移失败: %w", e)
+		}
 	}
 	a := &app{startedAt: time.Now(), state: v, store: s, config: c, cms: configuredCMSClient(c), sessions: map[string]adminSession{}, attempts: map[string]attempt{}, members: map[string]*memberSession{}, checkouts: map[string]checkout{}, assets: filepath.Join(c.DataDir, "assets")}
 	if e = os.MkdirAll(a.assets, 0700); e != nil {
@@ -361,6 +374,18 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		v := a.readState()
+		if route == "/api/admin/application-settings" {
+			return a.adminApplication(w, r)
+		}
+		if strings.HasPrefix(route, "/api/admin/playback-center") {
+			return a.adminPlaybackCenter(w, r)
+		}
+		if route == "/api/admin/announcements" {
+			return a.adminAnnouncements(w, r)
+		}
+		if strings.HasPrefix(route, "/api/admin/manage/") {
+			return a.adminManagement(w, r)
+		}
 		if strings.HasPrefix(route, "/api/admin/ads") {
 			return a.adminAds(w, r)
 		}
@@ -571,6 +596,8 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		out["playback"] = publicEngineSummary(v, p, osName)
+		out["application"] = publicApplication(v, p)
+		out["danmu"] = publicDanmuPreferences(v, p)
 		jsonResponse(w, 200, out)
 		return nil
 	}
@@ -603,10 +630,12 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		out, e := a.catalog(context.WithValue(r.Context(), cachePlatformKey{}, p), v.CMSBase, r.URL.Query())
+		out, e := a.catalog(context.WithValue(context.WithValue(r.Context(), cachePlatformKey{}, p), catalogLimitKey{}, applicationState(v).Config.Application.ListLimit), v.CMSBase, r.URL.Query())
 		if e != nil {
 			return e
 		}
+		out = clone(out)
+		applyPlaybackSources(v, out)
 		jsonResponse(w, 200, out)
 		return nil
 	}
@@ -620,6 +649,15 @@ func (a *app) handle(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Cache-Control", "public,max-age=31536000,immutable")
 		http.ServeFile(w, r, filepath.Join(a.assets, path.Base(route)))
 		return nil
+	}
+	if route == "/api/application/config" || route == "/api/application/captcha" || route == "/api/member/history" || route == "/api/member/avatar" || route == "/api/member/invitation" {
+		return a.applicationClientRoute(w, r, v)
+	}
+	if route == "/api/playback/danmu" {
+		return a.clientThirdPartyDanmu(w, r, v)
+	}
+	if strings.HasPrefix(route, "/api/community/") {
+		return a.communityRoute(w, r, v)
 	}
 	if strings.HasPrefix(route, "/api/member/") || strings.HasPrefix(route, "/api/checkout/") || route == "/api/playback" {
 		return a.memberRoute(w, r, v)

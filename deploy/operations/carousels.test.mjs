@@ -10,7 +10,7 @@ function domain(file){
  const full=path.join(root,'src/domain',file);if(modules.has(full))return modules.get(full);
  if(file.endsWith('.json'))return JSON.parse(fs.readFileSync(full,'utf8'));
  const module={exports:{}};modules.set(full,module.exports);
- const js=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
+ const js=ts.transpileModule(fs.readFileSync(full,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText;
  new Function('require','module','exports',js)(name=>domain(name.replace('./','')+(name.endsWith('.json')?'':'.ts')),module,module.exports);return module.exports;
 }
 const rules=domain('operation-carousels.ts'),pages=domain('operation-pages.ts');
@@ -27,6 +27,39 @@ function editor(api={}){
 const film={id:'56',title:'CMS影片',carouselImage:'javascript:bad',poster:'https://example.com/poster.jpg'};
 const rehydrate=e=>{e.props.theme=JSON.parse(JSON.stringify(e.props.theme));};
 const record=e=>e.props.theme.carouselGroups[0];
+test('默认轮播组名称跟随绑定、分类改名和解绑，保存回填后仍保持自动命名',async()=>{
+ const e=editor();try{
+  e.bind(record(e),'movie');e.props.theme.categories.push({id:'home',label:'首页',enabled:true,categoryId:'',page:'home'});
+  e.addGroup();let g=e.props.theme.carouselGroups[1];const id=g.id;
+  assert.equal(g.name,'新轮播组');assert.equal(g.nameMode,'auto');
+  e.openName(id);e.finishName(id);assert.equal(g.nameMode,'auto');
+  e.bind(g,'home');assert.equal(g.name,'首页轮播组');
+  rehydrate(e);await vue.nextTick();g=e.props.theme.carouselGroups[1];
+  e.props.theme.categories.find(c=>c.id==='home').label='推荐';await vue.nextTick();assert.equal(g.name,'推荐轮播组');
+  e.bind(g,'movie');assert.equal(g.name,'电影轮播组');assert.equal(g.nameMode,'auto');
+  e.bind(g,'movie');assert.equal(g.name,'新轮播组');assert.equal(g.enabled,false);
+  rehydrate(e);await vue.nextTick();assert.equal(e.props.theme.carouselGroups[1].nameMode,'auto');
+ }finally{e.dispose();}
+});
+test('手动名称在换绑、分类改名和保存回填后优先，轮播内容保持原样',async()=>{
+ const e=editor();try{
+  const theme=fixture();theme.carouselGroups[0].name='新轮播组';e.props.theme=theme;await vue.nextTick();
+  let g=record(e);assert.equal(g.name,'电影轮播组');assert.equal(g.nameMode,'auto');
+  const slides=JSON.stringify(g.slides);e.rename(g.id,'本周精选',true);assert.equal(g.nameMode,'custom');
+  e.props.theme.categories.push({id:'anime',label:'动漫',enabled:true,categoryId:'2',page:'home'});
+  rehydrate(e);await vue.nextTick();g=record(e);e.bind(g,'anime');
+  e.props.theme.categories.find(c=>c.id==='anime').label='动画';await vue.nextTick();
+  assert.equal(g.name,'本周精选');e.bind(g,'anime');assert.equal(g.name,'本周精选');
+  rehydrate(e);await vue.nextTick();assert.equal(record(e).name,'本周精选');assert.equal(record(e).nameMode,'custom');assert.equal(JSON.stringify(record(e).slides),slides);
+ }finally{e.dispose();}
+});
+test('旧自定义名称兼容，长分类名称不超存储上限且保留完整字符',()=>{
+ const theme=fixture(),g=theme.carouselGroups[0];rules.syncCarouselGroupName(theme,g);assert.equal(g.name,'电影');assert.equal(g.nameMode,'custom');
+ for(const [label,prefix] of [['影'.repeat(100),'影'.repeat(77)],['𠮷'.repeat(100),'𠮷'.repeat(57)]]){
+  theme.categories[0].label=label;g.nameMode='auto';rules.syncCarouselGroupName(theme,g);
+  assert.equal(g.name,prefix+'轮播组');assert.ok(Buffer.byteLength(g.name)<=240);assert.ok([...g.name].length<=80);
+ }
+});
 test('展示影片和跳转影片独立，自动保存替换主题后选择仍作用于当前条目',async()=>{
  const e=editor();try{
   const old=record(e);await e.openFilms(old,old.slides[0],'display');rehydrate(e);e.chooseFilm(film);

@@ -59,6 +59,8 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node -e "if(process.env.RELEASE_TAG!=='v'+require('./package.json').version)throw Error('Release tag must match package.json version')"
+      - name: Check CMS management adapter syntax
+        run: php -l go-server/cms/Hetunops.php
       - name: Install locked dependencies outside source
         run: |
           mkdir -p "$RUNNER_TEMP/hetun-ops-dependencies"

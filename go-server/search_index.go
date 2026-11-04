@@ -27,6 +27,7 @@ type searchIndex struct {
 	Documents []searchDocument
 }
 type searchJob struct {
+	Source     string
 	Phase      string
 	Message    string
 	StartedAt  string
@@ -42,7 +43,7 @@ func (a *app) searchStatus(p string) M {
 	a.searchMu.Lock()
 	defer a.searchMu.Unlock()
 	out := M{"phase": "idle", "message": "尚未建立索引", "documents": 0, "pages": 0, "ready": false, "sourceConfigured": v.CMSBase != "", "builtAt": "", "expiresAt": "", "startedAt": "", "finishedAt": ""}
-	if job := a.searchJobs[p]; job != nil {
+	if job := a.searchJobs[p]; job != nil && job.Source == source {
 		out["phase"] = job.Phase
 		out["message"] = job.Message
 		out["documents"] = job.Documents
@@ -75,14 +76,14 @@ func (a *app) adminRebuildSearch(w http.ResponseWriter, r *http.Request) error {
 	}
 	source := a.searchSource(v.CMSBase)
 	a.searchMu.Lock()
-	if job := a.searchJobs[p]; job != nil && job.Phase == "running" {
+	if job := a.searchJobs[p]; job != nil && job.Source == source && job.Phase == "running" {
 		a.searchMu.Unlock()
 		return coded(409, "当前客户端的索引正在重建，请等待完成", "INDEX_RUNNING")
 	}
 	if a.searchJobs == nil {
 		a.searchJobs = map[string]*searchJob{}
 	}
-	job := &searchJob{Phase: "running", Message: "正在读取内容源", StartedAt: now()}
+	job := &searchJob{Source: source, Phase: "running", Message: "正在读取内容源", StartedAt: now()}
 	a.searchJobs[p] = job
 	a.searchMu.Unlock()
 	go a.rebuildSearch(p, v.CMSBase, source, job)
@@ -101,6 +102,9 @@ func (a *app) rebuildSearch(p, base, source string, job *searchJob) {
 	finish := func(err error) {
 		a.searchMu.Lock()
 		defer a.searchMu.Unlock()
+		if job.Phase != "running" || a.searchJobs[p] != job {
+			return
+		}
 		job.FinishedAt = now()
 		if err != nil {
 			job.Phase = "failed"
@@ -115,6 +119,12 @@ func (a *app) rebuildSearch(p, base, source string, job *searchJob) {
 		job.Message = "重建完成"
 	}
 	for page := 1; page <= searchMaxPages; page++ {
+		a.searchMu.Lock()
+		active := a.searchJobs[p] == job && job.Phase == "running"
+		a.searchMu.Unlock()
+		if !active {
+			return
+		}
 		if ctx.Err() != nil {
 			finish(fmt.Errorf("读取超时，请检查内容源"))
 			return
@@ -152,6 +162,10 @@ func (a *app) rebuildSearch(p, base, source string, job *searchJob) {
 			docs = append(docs, searchDocument{Item: item, Text: text})
 		}
 		a.searchMu.Lock()
+		if a.searchJobs[p] != job || job.Phase != "running" {
+			a.searchMu.Unlock()
+			return
+		}
 		job.Pages = page
 		job.Documents = len(docs)
 		job.Message = fmt.Sprintf("已读取 %d 页 · %d 部影片", page, len(docs))
@@ -204,7 +218,59 @@ func (a *app) indexedCatalog(ctx context.Context, base string, q url.Values, pag
 		})
 	}
 	total := len(items)
-	start := min((page-1)*20, total)
-	end := min(start+20, total)
-	return M{"items": items[start:end], "total": total, "pages": max(1, (total+19)/20), "page": page, "searchSource": "local-index", "indexedAt": index.BuiltAt.UTC().Format(time.RFC3339)}, true
+	size := 20
+	if limit, _ := ctx.Value(catalogLimitKey{}).(int); limit > 0 {
+		size = min(size, limit)
+	}
+	start := min((page-1)*size, total)
+	end := min(start+size, total)
+	return M{"items": items[start:end], "total": total, "pages": max(1, (total+size-1)/size), "page": page, "searchSource": "local-index", "indexedAt": index.BuiltAt.UTC().Format(time.RFC3339)}, true
+}
+
+// Scheduling is source-aware and shares the same job lock with manual rebuilds.
+func (a *app) scheduleSearch(at time.Time) {
+	v := a.readState()
+	interval := time.Duration(applicationState(v).Config.Search.IntervalMinutes) * time.Minute
+	if interval <= 0 || v.CMSBase == "" {
+		return
+	}
+	source := a.searchSource(v.CMSBase)
+	a.searchMu.Lock()
+	if a.searchJobs == nil {
+		a.searchJobs = map[string]*searchJob{}
+	}
+	starts := map[string]*searchJob{}
+	for _, p := range platforms {
+		if job := a.searchJobs[p]; job != nil && job.Source == source {
+			if job.Phase == "running" {
+				continue
+			}
+			finished, _ := time.Parse(time.RFC3339, job.FinishedAt)
+			if !finished.IsZero() && at.Sub(finished) < interval {
+				continue
+			}
+		}
+		if index := a.searchIndexes[p]; index != nil && index.Source == source && at.Sub(index.BuiltAt) < interval {
+			continue
+		}
+		job := &searchJob{Source: source, Phase: "running", Message: "定时同步：正在读取完整内容源", StartedAt: now()}
+		a.searchJobs[p] = job
+		starts[p] = job
+	}
+	a.searchMu.Unlock()
+	for p, job := range starts {
+		go a.rebuildSearch(p, v.CMSBase, source, job)
+	}
+}
+func (a *app) runSearchScheduler(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case at := <-ticker.C:
+			a.scheduleSearch(at)
+		}
+	}
 }

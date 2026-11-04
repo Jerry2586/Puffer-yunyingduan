@@ -35,19 +35,26 @@ type credential struct {
 	Algorithm string `json:"algorithm"`
 }
 type state struct {
-	PlaybackEngines       *engineSettings       `json:"playbackEngines,omitempty"`
-	Playback              *playbackSettings     `json:"playbackResolvers,omitempty"`
-	Advertising           map[string]*adAccount `json:"advertising,omitempty"`
-	AppReleases           []appRelease          `json:"appReleases,omitempty"`
-	ManagedReleaseTargets map[string]bool       `json:"managedReleaseTargets,omitempty"`
-	ServiceRouting        M                     `json:"serviceRouting,omitempty"`
-	CMSLocalRoot          string                `json:"cmsLocalRoot,omitempty"`
-	CMSBase               string                `json:"cmsBase"`
-	UpdatedAt             string                `json:"updatedAt"`
-	Setup                 M                     `json:"setup"`
-	Operations            map[string]*record    `json:"operations"`
-	Credential            credential            `json:"admin"`
-	Revision              int64                 `json:"revision"`
+	ApplicationSettings   *applicationSettings      `json:"applicationSettings,omitempty"`
+	Registrations         []registrationReservation `json:"registrations,omitempty"`
+	MemberHistories       []memberHistory           `json:"memberHistories,omitempty"`
+	PlaybackPreferences   *playbackPreferences      `json:"playbackPreferences,omitempty"`
+	Announcements         *announcementState        `json:"announcements,omitempty"`
+	ManagementConnection  *managementConnection     `json:"managementConnection,omitempty"`
+	Community             *communityState           `json:"community,omitempty"`
+	PlaybackEngines       *engineSettings           `json:"playbackEngines,omitempty"`
+	Playback              *playbackSettings         `json:"playbackResolvers,omitempty"`
+	Advertising           map[string]*adAccount     `json:"advertising,omitempty"`
+	AppReleases           []appRelease              `json:"appReleases,omitempty"`
+	ManagedReleaseTargets map[string]bool           `json:"managedReleaseTargets,omitempty"`
+	ServiceRouting        M                         `json:"serviceRouting,omitempty"`
+	CMSLocalRoot          string                    `json:"cmsLocalRoot,omitempty"`
+	CMSBase               string                    `json:"cmsBase"`
+	UpdatedAt             string                    `json:"updatedAt"`
+	Setup                 M                         `json:"setup"`
+	Operations            map[string]*record        `json:"operations"`
+	Credential            credential                `json:"admin"`
+	Revision              int64                     `json:"revision"`
 }
 
 // All state changes use a durable store and compare-and-swap revision. One service process per instance.

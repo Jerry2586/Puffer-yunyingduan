@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-var buildVersion = "0.3.17"
+var buildVersion = "0.3.18"
 var errNoState = sql.ErrNoRows
 
 func loadConfig(name string) (config, error) {
@@ -211,6 +211,9 @@ func run() error {
 	a.updater = newSystemUpdater(executable, a.configPath)
 	logStartup(c.Listen, c.PublicOrigin, c.AdminPath, false)
 	go a.autoConnectCMS()
+	schedulerContext, stopScheduler := context.WithCancel(context.Background())
+	defer stopScheduler()
+	go a.runSearchScheduler(schedulerContext)
 	return serveWithUpdates(c.Listen, a, a.updater.restart)
 }
 

@@ -11,6 +11,7 @@ function evaluate(){
  if(props.studio||!props.ready)return;
  if(dialog.value==='update'&&!policy.value.available){dialog.value='';manualPreview.value=false;}
  if(policy.value.automatic&&(policy.value.forced||!dismissedUpdates.has(props.theme.clientSettings.latestVersion))){dialog.value='update';actionError.value='';return;}
+ if(dialog.value==='announcement'&&!manualPreview.value&&(!props.theme.announcement.enabled||props.theme.announcement.style!=='modal'||!props.theme.announcement.text.trim()))dialog.value='';
  if(dialog.value)return;
  const key=announcementKey(props.theme.announcement,props.scope);
  if(shouldAnnounce(props.theme.announcement,seenLaunch.has(key),String(uni.getStorageSync(key)||''),today())){dialog.value='announcement';actionError.value='';}

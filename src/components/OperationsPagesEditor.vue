@@ -6,6 +6,7 @@ import OperationsNavigationEditor from './OperationsNavigationEditor.vue';
 import CmsCategoryBinding from './CmsCategoryBinding.vue';
 import EditorChoice from './EditorChoice.vue';
 import OperationsLayoutFields from './OperationsLayoutFields.vue';
+import EntryTextColor from './EntryTextColor.vue';
 const props=defineProps<{theme:Theme;active:string;page:AppPage;pageId:string;categories:Category[];loadCategories:()=>Promise<Category[]>}>();
 const emit=defineEmits<{preview:[page:AppPage,pageId:string];message:[message:string];edit:[]}>();
 const pages=computed(()=>props.theme.contentPages||[]);
@@ -17,9 +18,14 @@ const pageOptions=computed(()=>[...(!homeContentPage(props.theme,true)?[{id:'rou
 const selectedPage=computed(()=>currentPageId.value?'content:'+currentPageId.value:'route:'+props.page);
 const selectedModuleId=ref(''),tab=ref<'sections'|'carousel'>('sections'),settingsOpen=ref(false);
 const selectedModule=computed(()=>modules.value.find(s=>s.id===selectedModuleId.value));
+const editingNameId=ref('');
+const nameDrafts=ref<Record<string,string>>({});
 const editable=computed(()=>Boolean(current.value)||props.page==='home');
 watch(()=>[currentPageId.value,props.page,modules.value.map(s=>s.id).join(',')],()=>{
  if(!selectedModule.value)selectedModuleId.value=modules.value[0]?.id||'';
+ const ids=new Set(modules.value.map(s=>s.id));
+ if(!ids.has(editingNameId.value))editingNameId.value='';
+ for(const id of Object.keys(nameDrafts.value))if(!ids.has(id))delete nameDrafts.value[id];
 },{immediate:true});
 function uid(prefix:string){return prefix+'-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);}
 function preview(value:string|number){const id=String(value);if(id.startsWith('content:')){const p=findContentPage(props.theme,id.slice(8));if(p)emit('preview',pageRoute(p),p.id);}else emit('preview','home','');}
@@ -40,7 +46,35 @@ function changeKind(value:string|number){
  emit('preview',pageRoute(p),p.id);
 }
 function deletePage(){const p=current.value;if(!p)return;uni.showModal({title:'删除页面',content:'删除“'+p.title+'”及其所有导航入口、栏目和轮播绑定？其他页面会保留。',success:r=>{if(r.confirm){removeContentPage(props.theme,p.id);emit('preview','home','');}}});}
-function moveScoped<T>(list:T[],scope:T[],item:T,delta:number){const neighbor=scope[scope.indexOf(item)+delta];if(neighbor!==undefined){const i=list.indexOf(item),j=list.indexOf(neighbor);if(i>=0&&j>=0)[list[i],list[j]]=[list[j],list[i]];}}
+function moveModule(id:string,delta:number){
+ const index=modules.value.findIndex(s=>s.id===id);if(index<0)return;
+ const neighbor=modules.value[index+delta];if(!neighbor)return;
+ const list=props.theme.sections,i=list.findIndex(s=>s.id===id),j=list.findIndex(s=>s.id===neighbor.id);
+ if(i>=0&&j>=0){[list[i],list[j]]=[list[j],list[i]];selectedModuleId.value=id;}
+}
+function moduleName(s:Section){return nameDrafts.value[s.id]??s.title;}
+function openName(id:string){
+ if(editingNameId.value&&editingNameId.value!==id)finishName(editingNameId.value);
+ if(modules.value.some(s=>s.id===id)){selectedModuleId.value=id;editingNameId.value=id;}
+}
+function finishName(id:string){const s=modules.value.find(s=>s.id===id);if(s)renameModule(id,moduleName(s),true);}
+function renameModule(id:string,value:string,finish=false){
+ const s=modules.value.find(s=>s.id===id);if(!s)return;
+ nameDrafts.value[id]=value;
+ const name=value.trim(),valid=!!name&&new TextEncoder().encode(name).length<=240;
+ if(valid&&name!==s.title)s.title=name;
+ if(finish){
+  if(!valid)emit('message','栏目名称不能为空，最多80个汉字。');
+  delete nameDrafts.value[id];if(editingNameId.value===id)editingNameId.value='';
+ }
+}
+function setHeadingColor(id:string,color:string|undefined){
+ if(color!==undefined&&!/^#[0-9a-fA-F]{6}$/.test(color))return;
+ const s=modules.value.find(s=>s.id===id);if(!s)return;
+ const appearance={...s.appearance};
+ if(color)appearance.headingColor=color;else delete appearance.headingColor;
+ if(Object.keys(appearance).length)s.appearance=appearance;else delete s.appearance;
+}
 function remove<T>(list:T[],item:T){const i=list.indexOf(item);if(i>=0)list.splice(i,1);}
 function createModule(p?:ContentPage){
  if(props.theme.sections.length>=40){emit('message','栏目总数最多40个。');return;}
@@ -83,16 +117,27 @@ const sorts=[{id:'latest',label:'最新更新'},{id:'score',label:'当前页评�
    <template v-if="tab==='sections'">
     <view class="section-header"><view><text class="section-title">影片栏目</text><text class="muted">按列表顺序显示；数量与内容排序分别设置</text></view><button class="primary" @click="createModule(current)">＋ 添加栏目</button></view>
     <view class="workspace"><view class="item-list">
-     <button v-for="(s,i) in modules" :key="s.id" class="list-row" :class="{selected:s.id===selectedModuleId}" @click="selectedModuleId=s.id"><text class="number">{{String(i+1).padStart(2,'0')}}</text><view class="row-copy"><text>{{s.title||'未命名栏目'}}</text><text class="muted">{{s.orderBy==='manual'?'手动片单':categoryLabel(s.categoryId)}} · {{s.limit}} 部</text></view><text class="status" :class="{off:!s.enabled}">{{s.enabled?'开启':'关闭'}}</text></button>
+     <view v-for="(s,i) in modules" :key="s.id" class="list-row module-row" :class="{selected:s.id===selectedModuleId}" @click="selectedModuleId=s.id">
+      <text class="number">{{String(i+1).padStart(2,'0')}}</text>
+      <view class="row-copy">
+       <view class="module-title">
+        <input v-if="editingNameId===s.id" class="rename-input" :aria-label="'栏目 '+(i+1)+'名称'" :value="moduleName(s)" :focus="true" maxlength="80" placeholder="输入栏目名称" confirm-type="done" @click.stop @input="renameModule(s.id,($event as any).detail.value)" @blur="editingNameId===s.id&&renameModule(s.id,($event as any).detail.value,true)" @confirm="renameModule(s.id,($event as any).detail.value,true)"/>
+        <template v-else><button class="module-select" :aria-pressed="s.id===selectedModuleId" :title="s.title||'未命名栏目'" @click.stop="selectedModuleId=s.id">{{s.title||'未命名栏目'}}</button><button class="rename-button" :aria-label="'修改栏目名称：'+(s.title||'未命名栏目')" title="修改名称" @click.stop="openName(s.id)">🖊</button></template>
+        <EntryTextColor class="heading-color" :label="'栏目 '+(s.title||'未命名栏目')" :model-value="typeof s.appearance?.headingColor==='string'?s.appearance.headingColor:undefined" :default-color="theme.colors.text" @update:model-value="setHeadingColor(s.id,$event)"/>
+       </view>
+       <text class="muted">{{s.orderBy==='manual'?'手动片单':categoryLabel(s.categoryId)}} · {{s.limit}} 部</text>
+      </view>
+      <view class="row-controls"><view class="order-buttons"><button :disabled="i===0" :aria-label="'上移栏目：'+s.title" title="上移" @click.stop="moveModule(s.id,-1)">↑</button><button :disabled="i===modules.length-1" :aria-label="'下移栏目：'+s.title" title="下移" @click.stop="moveModule(s.id,1)">↓</button></view><text class="status" :class="{off:!s.enabled}">{{s.enabled?'开启':'关闭'}}</text></view>
+     </view>
      <view v-if="!modules.length" class="empty">尚未添加栏目<text>为当前页面添加分类内容或手动片单。</text></view>
-    </view><view class="inspector"><template v-if="selectedModule"><text class="section-title">栏目设置</text><label>栏目标题<input v-model="selectedModule.title" maxlength="80"/></label><label>栏目说明<input v-model="selectedModule.subtitle" maxlength="240" placeholder="选填"/></label><label>内容分类<CmsCategoryBinding :model-value="selectedModule.categoryId" :categories="categories" :load-categories="loadCategories" root-only :unbound-label="current?.kind==='category'?'未绑定 · 暂不显示分类内容':undefined" @update:model-value="setModuleCategory(selectedModule!,$event)"/></label><label>内容排序<EditorChoice v-model="selectedModule.orderBy" :options="sorts"/></label><label v-if="selectedModule.orderBy==='manual'">影片 ID（按输入顺序显示）<input v-model="selectedModule.manualIds" placeholder="例如：123,456,789"/></label><label>显示数量（1–60 部）<input type="number" :value="selectedModule.limit" @blur="setLimit(selectedModule,$event)"/></label><label>栏目排版<EditorChoice v-model="selectedModule.style" :options="[{id:'grid3',label:'宫格'},{id:'grid2',label:'双列宫格（兼容）'},{id:'scroll',label:'单行横滑'},{id:'list',label:'图文列表'},{id:'ranking',label:'排行列表'},{id:'mosaic',label:'拼图'}]"/></label>
+    </view><view class="inspector"><template v-if="selectedModule"><text class="section-title">栏目设置</text><label>栏目标题<input :value="moduleName(selectedModule)" maxlength="80" @input="renameModule(selectedModule.id,($event as any).detail.value)" @blur="renameModule(selectedModule.id,($event as any).detail.value,true)"/></label><label>栏目说明<input v-model="selectedModule.subtitle" maxlength="240" placeholder="选填"/></label><label>内容分类<CmsCategoryBinding :model-value="selectedModule.categoryId" :categories="categories" :load-categories="loadCategories" root-only :unbound-label="current?.kind==='category'?'未绑定 · 暂不显示分类内容':undefined" @update:model-value="setModuleCategory(selectedModule!,$event)"/></label><label>内容排序<EditorChoice v-model="selectedModule.orderBy" :options="sorts"/></label><label v-if="selectedModule.orderBy==='manual'">影片 ID（按输入顺序显示）<input v-model="selectedModule.manualIds" placeholder="例如：123,456,789"/></label><label>显示数量（1–60 部）<input type="number" :value="selectedModule.limit" @blur="setLimit(selectedModule,$event)"/></label><label>栏目排版<EditorChoice v-model="selectedModule.style" :options="[{id:'grid3',label:'宫格'},{id:'grid2',label:'双列宫格（兼容）'},{id:'scroll',label:'单行横滑'},{id:'list',label:'图文列表'},{id:'ranking',label:'排行列表'},{id:'mosaic',label:'拼图'}]"/></label>
 <label v-if="!['scroll','list','ranking','mosaic'].includes(selectedModule.style||'grid3')">宫格列数<EditorChoice :model-value="selectedModule.columns" :options="[2,3,4,5,6].map(n=>({id:String(n),label:n+' 列'}))" @update:model-value="selectedModule.columns=Number($event)"/></label>
 <label>封面比例<EditorChoice v-model="selectedModule.ratio" :options="[{id:'2/3',label:'竖版 2:3'},{id:'3/4',label:'竖版 3:4'},{id:'16/9',label:'横版 16:9'},{id:'1/1',label:'方形 1:1'}]"/></label>
 <label>卡片间距（0–32 px）<input type="number" :value="selectedModule.gap??8" @blur="setGeometry(selectedModule,'gap',$event,0,32,8)"/></label>
 <label>封面圆角（0–40 px）<input type="number" :value="selectedModule.radius??theme.layout.posterRadius" @blur="setGeometry(selectedModule,'radius',$event,0,40,theme.layout.posterRadius)"/></label>
 <OperationsLayoutFields v-model="selectedModule.appearance" kind="section" title="当前栏目" :text-color="theme.colors.text" :background="theme.colors.background" :accent="theme.colors.accent"/>
 <view v-for="flag in sectionFlags" :key="flag.key" class="switch-line"><text>{{flag.label}}</text><switch :checked="flag.key==='showYear'?!!selectedModule[flag.key]:selectedModule[flag.key]!==false" @change="selectedModule[flag.key]=checked($event)"/></view>
-<view class="switch-line"><text>显示这个栏目</text><switch :checked="selectedModule.enabled" @change="selectedModule.enabled=checked($event)"/></view><view class="actions"><button :disabled="modules.indexOf(selectedModule)===0" @click="moveScoped(theme.sections,modules,selectedModule,-1)">上移</button><button :disabled="modules.indexOf(selectedModule)===modules.length-1" @click="moveScoped(theme.sections,modules,selectedModule,1)">下移</button><button class="danger" @click="remove(theme.sections,selectedModule)">移除栏目</button></view></template><view v-else class="empty">选择左侧栏目进行编辑</view></view></view>
+<view class="switch-line"><text>显示这个栏目</text><switch :checked="selectedModule.enabled" @change="selectedModule.enabled=checked($event)"/></view><view class="actions"><button :disabled="modules.indexOf(selectedModule)===0" @click="moveModule(selectedModule.id,-1)">上移</button><button :disabled="modules.indexOf(selectedModule)===modules.length-1" @click="moveModule(selectedModule.id,1)">下移</button><button class="danger" @click="remove(theme.sections,selectedModule)">移除栏目</button></view></template><view v-else class="empty">选择左侧栏目进行编辑</view></view></view>
    </template>
    <template v-else>
     <view class="section-header"><view><text class="section-title">已绑定轮播模块</text><text class="muted">引用轮播图中心的绑定；请前往轮播图中心编辑图片、跳转及开关。</text></view></view>
@@ -103,4 +148,16 @@ const sorts=[{id:'latest',label:'最新更新'},{id:'score',label:'当前页评�
 </view></template>
 <style scoped>
 .operations-editor{display:flex;flex-direction:column;gap:20px;color:var(--studio-text,#d8e3df)}.intro{padding-bottom:16px;border-bottom:1px solid var(--studio-border,#ffffff12)}.heading{display:block;font-size:18px;font-weight:600;letter-spacing:-.3px}.muted{display:block;font-size:11px;line-height:1.8;color:var(--studio-muted,#91a9a0);margin-top:4px}.page-toolbar,.page-summary,.section-header,.switch-line{display:flex;align-items:center;justify-content:space-between;gap:12px}.page-toolbar{align-items:flex-end;flex-wrap:wrap}.page-selector{flex:1 1 320px;min-width:0}.page-selector-label{display:block;margin-bottom:8px;font-size:11px;color:var(--studio-muted,#91a9a0)}.page-buttons,.page-toolbar-actions{display:flex;flex-wrap:wrap;gap:8px}.page-button{max-width:100%;padding:6px 16px;font-size:12px;line-height:22px;white-space:normal;overflow-wrap:anywhere}.page-button.chosen{border-color:var(--studio-link,#c9eaa2);background:var(--studio-action,#26372d);color:var(--studio-link,#c9eaa2);font-weight:600}.page-settings{display:flex;flex-direction:column;gap:16px;padding:20px;border:1px solid var(--studio-border,#ffffff12);border-radius:10px;background:var(--studio-panel,#111b21)}.fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}.section-title{font-size:13px;font-weight:600}.summary-count{font-size:10px;color:var(--studio-muted,#91a9a0);white-space:nowrap}.structure{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 16px;background:var(--studio-input,#172329);border-radius:8px;font-size:11px}.structure>text:nth-child(even){color:var(--studio-muted,#91a9a0);transform:rotate(-90deg)}.content-tabs{display:flex;gap:20px;border-bottom:1px solid var(--studio-border,#ffffff12)}.content-tabs button{border:0;border-radius:0;background:transparent;padding:8px 0;color:var(--studio-muted,#91a9a0);border-bottom:2px solid transparent}.content-tabs button.chosen{border-color:var(--studio-link,#c9eaa2);color:var(--studio-text,#d8e3df)}.content-tabs button text{font-size:10px;margin-left:5px;opacity:.6}.workspace{display:grid;grid-template-columns:minmax(210px,1fr) minmax(250px,1fr);border:1px solid var(--studio-border,#ffffff12);border-radius:12px;overflow:hidden}.item-list{padding:8px;background:var(--studio-panel,#111b21);min-width:0}.list-row{width:100%;display:flex;align-items:center;gap:12px;padding:12px 10px;margin:2px 0;border-color:transparent;background:transparent;text-align:left;min-height:64px;line-height:1.5}.list-row.selected{border-color:var(--studio-link,#c9eaa2);background:#91b3760c}.row-copy{flex:1;min-width:0}.row-copy>text{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.number{font-size:10px;font-variant-numeric:tabular-nums;color:var(--studio-muted,#91a9a0)}.status{font-size:10px;color:var(--studio-link,#c9eaa2)}.status.off{color:var(--studio-muted,#91a9a0)}.inspector{padding:20px;border-left:1px solid var(--studio-border,#ffffff12);display:flex;flex-direction:column;gap:16px;min-width:0}.actions{display:flex;gap:6px;flex-wrap:wrap}.empty{padding:36px 16px;font-size:12px;line-height:1.8;text-align:center;color:var(--studio-muted,#91a9a0)}.empty>text{display:block;font-size:11px;margin:8px 0}.empty button{margin:16px auto 0}.frame-switch{padding:0 4px;font-size:12px}label{display:flex;flex-direction:column;gap:8px;font-size:11px;min-width:0}input{height:40px;box-sizing:border-box;padding:0 11px;border:1px solid var(--studio-border,#ffffff12);border-radius:6px;background:var(--studio-input,#172329);color:inherit;font-size:12px}button{margin:0;padding:4px 12px;border:1px solid var(--studio-border,#ffffff12);border-radius:6px;background:var(--studio-input,#172329);color:inherit;font-size:11px;line-height:28px;cursor:pointer}button::after{border:0}button.primary{background:var(--studio-action,#26372d);color:var(--studio-link,#c9eaa2)}button[disabled]{opacity:.35;cursor:default}.danger{color:#e8a99d}button:focus-visible{outline:2px solid var(--studio-link,#c9eaa2);outline-offset:3px}switch{transform:scale(.8);transform-origin:right center}@media(hover:hover) and (pointer:fine){button:hover{border-color:var(--studio-link,#c9eaa2)}}@media(max-width:1080px){.workspace{grid-template-columns:1fr}.inspector{border-left:0;border-top:1px solid var(--studio-border,#ffffff12)}.item-list{max-height:320px;overflow:auto}}@media(max-width:600px){.fields{grid-template-columns:1fr}.page-summary{align-items:flex-start;flex-direction:column}.structure{gap:8px}}
+
+.module-row{box-sizing:border-box;border:1px solid transparent;border-radius:8px;gap:8px;cursor:pointer}
+.module-title{display:flex;align-items:center;min-width:0;gap:2px;min-height:28px}
+button.module-select{display:block;flex:0 1 auto;min-width:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:26px}
+button.rename-button{display:flex;align-items:center;justify-content:center;width:20px;height:22px;flex:none;margin:0 2px 0 0;padding:0;transform:translateY(-5px);font-size:12px;line-height:1;border:0;background:transparent}
+input.rename-input{flex:1;min-width:0;width:100%;height:30px;padding:0 7px;font-size:12px}
+.heading-color:deep(.color-wheel){width:22px;height:22px}
+.heading-color:deep(.color-wheel::after){inset:6px}
+.heading-color:deep(.reset-color){width:18px;height:22px;font-size:15px}
+.row-controls,.order-buttons{display:flex;align-items:center;flex:none;gap:8px}
+.order-buttons{gap:3px}
+.order-buttons button{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:24px;height:26px;padding:0;line-height:1;font-size:14px}
 </style>

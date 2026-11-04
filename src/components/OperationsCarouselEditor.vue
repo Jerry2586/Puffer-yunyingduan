@@ -4,7 +4,7 @@ import type {AppPage,Category,CarouselTarget,OperationsCarouselGroup,OperationsC
 import {api,assetUrl,chooseLocalFile} from '@/services/api';
 import {pageNames} from '@/domain/presentation';
 import {menuExternalUrl} from '@/domain/operation-pages';
-import {carouselGroupIssue,carouselImageValid,carouselSlideIssue,carouselTargetOptions,resetCarouselTarget,resolveCarouselRecord,carouselFilmImage} from '@/domain/operation-carousels';
+import {carouselGroupIssue,carouselImageValid,carouselSlideIssue,carouselTargetOptions,resetCarouselTarget,resolveCarouselRecord,carouselFilmImage,syncCarouselGroupName} from '@/domain/operation-carousels';
 import EditorChoice from './EditorChoice.vue';
 const props=defineProps<{theme:Theme;categories:Category[];loadCategories:()=>Promise<Category[]>}>();
 const emit=defineEmits<{message:[value:string]}>();
@@ -19,6 +19,9 @@ watch(()=>groups.value.map(g=>g.id),ids=>{
  if(!ids.includes(editingNameId.value))editingNameId.value='';
  for(const id of Object.keys(nameDrafts.value))if(!ids.includes(id))delete nameDrafts.value[id];
 });
+watch(()=>[groups.value.map(g=>[g.id,g.name,g.nameMode,...g.entryIds]),props.theme.categories.map(e=>[e.id,e.label])],()=>{
+ for(const group of groups.value)syncCarouselGroupName(props.theme,group);
+},{immediate:true});
 function groupName(group:OperationsCarouselGroup){return nameDrafts.value[group.id]??group.name;}
 function toggleExpanded(groupId:string){expandedId.value=expandedId.value===groupId?'':groupId;}
 function bindingLabel(group:OperationsCarouselGroup){const entry=props.theme.categories.find(e=>group.entryIds.includes(e.id));return entry?'已绑定：'+entry.label+(!entry.enabled?'（分类已关闭）':''):'未绑定一级分类';}
@@ -30,7 +33,7 @@ function uid(prefix:string){return prefix+'-'+Date.now().toString(36)+'-'+Math.r
 function current(groupId:string,slideId:string){return live?resolveCarouselRecord(props.theme,groupId,slideId):undefined;}
 function addGroup(){
  if(groups.value.length>=40){emit('message','轮播组最多40组。');return;}
- const group:OperationsCarouselGroup={id:uid('carousel'),name:'新轮播组',enabled:false,entryIds:[],slides:[]};
+ const group:OperationsCarouselGroup={id:uid('carousel'),name:'新轮播组',nameMode:'auto',enabled:false,entryIds:[],slides:[]};
  if(!props.theme.carouselGroups)props.theme.carouselGroups=[];
  props.theme.carouselGroups.push(group);expandedId.value=group.id;
 }
@@ -48,7 +51,7 @@ function rename(groupId:string,value:string,finish=false){
  const group=live?groups.value.find(g=>g.id===groupId):undefined;if(!group)return;
  nameDrafts.value[groupId]=value;
  const name=value.trim(),valid=!!name&&new TextEncoder().encode(name).length<=240;
- if(valid)group.name=name;
+ if(valid&&name!==group.name){group.nameMode='custom';group.name=name;}
  if(finish){if(!valid)emit('message','轮播组名称不能为空，最多80个汉字。');delete nameDrafts.value[groupId];if(editingNameId.value===groupId)editingNameId.value='';}
 }
 function owner(entryId:string){return groups.value.find(g=>g.entryIds.includes(entryId));}
@@ -56,7 +59,9 @@ function bind(group:OperationsCarouselGroup,entryId:string){
  const target=live?groups.value.find(g=>g.id===group.id):undefined;if(!target)return;
  if(!props.theme.categories.some(e=>e.id===entryId)){emit('message','该一级分类已不存在，请重新选择。');return;}
  const existing=owner(entryId);if(existing&&existing.id!==target.id){emit('message','该分类已绑定“'+existing.name+'”，请先解除原绑定。');return;}
+ syncCarouselGroupName(props.theme,target);
  target.entryIds=target.entryIds.includes(entryId)?[]:[entryId];
+ syncCarouselGroupName(props.theme,target);
  if(!target.entryIds.length)target.enabled=false;
 }
 function toggleGroup(group:OperationsCarouselGroup,on:boolean){switchRevision.value++;const target=live?groups.value.find(g=>g.id===group.id):undefined;if(!target)return;const issue=on?carouselGroupIssue(props.theme,target):'';if(issue){emit('message',issue);return;}target.enabled=on;}

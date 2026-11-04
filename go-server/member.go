@@ -142,8 +142,9 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 			return problem(405, "请求方法不支持")
 		}
 		id := str(input["id"])
-		sid, nid := number(input["sid"]), number(input["nid"])
-		if !vodID.MatchString(id) || sid < 1 || sid > 1000 || nid < 1 || nid > 10000 {
+		sid, sidOK := managementInteger(input["sid"], 1, 1000)
+		nid, nidOK := managementInteger(input["nid"], 1, 10000)
+		if !vodID.MatchString(id) || !sidOK || !nidOK {
 			return problem(400, "影片和集数参数无效")
 		}
 		s, e := a.memberSession(r, v.CMSBase, true)
@@ -153,6 +154,11 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		result, e := a.memberCall(r.Context(), s, "index.php/hetun/play", "POST", url.Values{"id": {id}, "sid": {strconv.Itoa(sid)}, "nid": {strconv.Itoa(nid)}})
 		if e != nil {
 			return fmt.Errorf("播放权限校验失败（需安装河豚 CMS 适配文件）: %w", e)
+		}
+		// Permission is always checked by CMS before applying local source rules.
+		code, trial, mode, e := a.playbackSourcePolicy(r.Context(), v, id, sid, nid)
+		if e != nil {
+			return e
 		}
 		info := obj(result["info"])
 		u, e := url.Parse(str(info["url"]))
@@ -175,15 +181,21 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		if e != nil {
 			return e
 		}
-		resolved, e := a.resolvePlayback(r.Context(), settings.Published, u.String(), p, excluded)
-		if e != nil {
-			return e
+		resolved := playbackResolution{OK: true, URL: u.String(), SourceID: "direct", Kind: "direct", Attempts: []resolverAttempt{}}
+		if mode == "direct" && has(excluded, "direct") {
+			return problem(502, "直连播放失败，请切换其他线路")
+		}
+		if mode != "direct" {
+			resolved, e = a.resolvePlayback(r.Context(), settings.Published, u.String(), p, excluded)
+			if e != nil {
+				return e
+			}
 		}
 		if !resolved.OK {
 			jsonResponse(w, 502, M{"error": resolved.Message, "code": "PLAYBACK_RESOLUTION_FAILED", "attempts": resolved.Attempts})
 			return nil
 		}
-		out := M{"url": resolved.URL, "name": str(info["name"]), "sourceId": resolved.SourceID, "kind": resolved.Kind, "attempts": resolved.Attempts, "resolverVersion": settings.PublishedVersion, "enginePolicy": enginePolicy}
+		out := M{"url": resolved.URL, "name": str(info["name"]), "sourceId": resolved.SourceID, "kind": resolved.Kind, "attempts": resolved.Attempts, "resolverVersion": settings.PublishedVersion, "enginePolicy": enginePolicy, "sourceCode": code, "trialSeconds": trial}
 		if engineClient != nil && enginePolicy["status"] == "negotiated" {
 			out["engineReportTicket"] = issueEngineReportTicket(v, p, engineClient, enginePolicy)
 		}
@@ -219,12 +231,50 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		if len(user) < 1 || len(user) > 80 || len(pass) < 1 || len(pass) > 128 {
 			return problem(400, "会员账号或密码无效")
 		}
+		if e := a.verifyApplicationCaptcha(r, v, name, input); e != nil {
+			return e
+		}
+		if e := a.applicationSnapshotCurrent(v, p); e != nil {
+			return e
+		}
 		jar, _ := cookiejar.New(nil)
 		s := &memberSession{Jar: jar, Base: v.CMSBase, Until: time.Now().Add(8 * time.Hour)}
 		if name == "register" {
-			_, e = a.memberCall(r.Context(), s, "api.php/user/register", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}, "user_pwd2": {str(input["password2"])}, "verify": {str(input["verify"])}})
+			if pass != str(input["password2"]) {
+				return problem(400, "两次输入的密码不一致")
+			}
+			cfg := applicationState(v).Config
+			var connection *managementConnection
+			if cfg.Registration.Managed {
+				connection, e = a.managementConnectionFor(v)
+				if e != nil {
+					return e
+				}
+			}
+			inviter := 0
+			if invite := str(input["inviteCode"]); invite != "" {
+				inviter = invitationUser(v, invite)
+				if !cfg.Share.Invite || inviter == 0 {
+					return problem(400, "邀请码无效或邀请功能已关闭")
+				}
+			}
+			if _, e := a.reserveRegistration(r, v); e != nil {
+				return e
+			}
+			if cfg.Registration.Managed {
+				if e := a.applicationSnapshotCurrent(v, p); e != nil {
+					return e
+				}
+				_, e = a.managementCall(r.Context(), connection, "member.register", registrationMemberData(cfg, user, pass, requestIP(r), inviter))
+			} else {
+				_, e = a.memberCall(r.Context(), s, "api.php/user/register", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}, "user_pwd2": {str(input["password2"])}, "verify": {str(input["verify"])}})
+			}
 			if e != nil {
 				return e
+			}
+			if cfg.Registration.Managed && !cfg.Registration.Active {
+				jsonResponse(w, 200, M{"registered": true, "pending": true})
+				return nil
 			}
 		}
 		if _, e = a.memberCall(r.Context(), s, "api.php/user/login", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}}); e != nil {
@@ -234,6 +284,7 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		if e != nil {
 			return e
 		}
+		s.UserID = numericOr(profile["user_id"], 0)
 		token := randomToken()
 		a.mu.Lock()
 		for k, s := range a.members {
@@ -280,6 +331,11 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 			groups = append(groups, pick(obj(g), keys...))
 		}
 		out = M{"isLogin": d["is_login"] == true || numericOr(d["is_login"], 0) == 1, "memberName": str(d["member_name"]), "expireDate": str(d["expire_date"]), "points": numericOr(d["user_points"], 0), "groups": groups}
+		membership := applicationState(v).Config.Membership
+		out["managed"] = membership.Managed
+		if membership.Managed {
+			out["pointsPlan"] = M{"groupId": membership.GroupID, "day": membership.Day, "week": membership.Week, "month": membership.Month, "year": membership.Year}
+		}
 	case "logout":
 		a.mu.Lock()
 		for k, session := range a.members {
@@ -317,6 +373,36 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		}
 		out["order"] = safeOrder(result["info"])
 	case "purchase", "upgrade":
+		if name == "upgrade" && applicationState(v).Config.Membership.Managed {
+			period := str(input["period"])
+			price := membershipPrice(v, period)
+			if price <= 0 {
+				return problem(400, "该积分套餐未开放")
+			}
+			connection, e := a.managementConnectionFor(v)
+			if e != nil {
+				return e
+			}
+			_, uid, e := a.applicationMember(r, v, p)
+			if e != nil {
+				return e
+			}
+			if e := a.applicationRateLimit("upgrade:"+managementBase(v.CMSBase)+":"+strconv.Itoa(uid), 5, time.Minute); e != nil {
+				return e
+			}
+			if e := a.applicationSnapshotCurrent(v, p); e != nil {
+				return e
+			}
+			_, e = a.managementCall(r.Context(), connection, "member.upgrade", M{"id": uid, "groupId": applicationState(v).Config.Membership.GroupID, "period": period, "points": price})
+			if e != nil {
+				return e
+			}
+			s.Mu.Lock()
+			s.ProfileVersion.Add(1)
+			s.Mu.Unlock()
+			out["ok"] = true
+			break
+		}
 		if name == "purchase" {
 			if str(input["platform"]) == "ios" {
 				return problem(400, "iOS 内购尚未配置")

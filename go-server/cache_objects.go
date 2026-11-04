@@ -73,7 +73,7 @@ func (a *app) cachedBootstrap(ctx context.Context, v state, p, os, version, orig
 	// Include the published document and releases, so a publish/rollback/URL change
 	// is immediately visible without clearing Redis. Drafts are never served.
 	r := v.Operations[p]
-	source, err := json.Marshal(M{"published": r.Published, "version": r.PublishedVersion, "at": r.PublishedAt, "release": latestAppRelease(v, p, os), "managed": v.ManagedReleaseTargets, "cms": v.CMSBase, "os": os, "clientVersion": version, "origin": origin})
+	source, err := json.Marshal(M{"announcement": currentAnnouncement(v), "published": r.Published, "version": r.PublishedVersion, "at": r.PublishedAt, "release": latestAppRelease(v, p, os), "managed": v.ManagedReleaseTargets, "cms": v.CMSBase, "os": os, "clientVersion": version, "origin": origin})
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,20 @@
 import type {CarouselTarget, OperationsCarouselGroup, OperationsCarouselSlide, Theme, Vod} from './types';
 import {menuExternalUrl} from './operation-pages';
 
+export function carouselDefaultName(theme:Theme,group:OperationsCarouselGroup):string{
+ const label=theme.categories.find(e=>e.id===group.entryIds[0])?.label.trim();
+ if(!label)return '新轮播组';
+ let prefix='',bytes=0,count=0;
+ for(const char of label){const size=new TextEncoder().encode(char).length;if(count===77||bytes+size>231)break;prefix+=char;bytes+=size;count++;}
+ return prefix+'轮播组';
+}
+export function syncCarouselGroupName(theme:Theme,group:OperationsCarouselGroup){
+ const automatic=carouselDefaultName(theme,group);
+ // Old default names migrate automatically; existing custom names stay intact.
+ group.nameMode??=group.name.trim()==='新轮播组'||group.name.trim()===automatic?'auto':'custom';
+ if(group.nameMode==='auto')group.name=automatic;
+}
+
 export const carouselTargetOptions=[{id:'vod',label:'影片详情'},{id:'page',label:'内置内容页'},{id:'external',label:'第三方网页'},{id:'system',label:'APP 功能'}];
 export function carouselImageValid(value:string){return /^\/api\/assets\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(value)||!!menuExternalUrl(value);}
 export function carouselSlideIssue(theme:Theme,slide:OperationsCarouselSlide):string{

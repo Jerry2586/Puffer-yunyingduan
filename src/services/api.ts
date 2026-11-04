@@ -1,4 +1,7 @@
 import defaults from '@/domain/default-theme.json';
+import {applicationRuntime,receiveApplication,receiveDanmu,type PublicApplication} from './application-runtime';
+import type {CaptchaInput} from './application';
+import {receiveMember} from './member-session';
 import {normalizeTheme} from '@/domain/normalize-theme';
 import type {Theme,StudioState,Catalog,Category,Platform} from '@/domain/types';
 export interface CmsCheck {url?:string;id:'categories'|'catalog';label:string;ok:boolean;latencyMs:number;count?:number;total?:number|null;error?:string;}
@@ -34,12 +37,15 @@ function templatePlatform(template:string):Platform {
  if(!['mobile','tablet','tv','web'].includes(p))throw new Error('客户端标识无效。');
  return p as Platform;
 }
+let configurationRequest=0;
+export function captureConfigurationRequest(){const revision=++configurationRequest,service=getServiceBase();return ()=>{if(revision!==configurationRequest||service!==getServiceBase())throw new Error('站点配置已更新，请重试。');};}
 export const api={
   exportTheme:(template:string)=>request<{name:string;data:string}>('/api/admin/export?template='+encodeURIComponent(template)),
   health:()=>request<{status:string;version:string;cmsConfigured:boolean}>('/api/health'),
   theme:async(platform:Platform='mobile'):Promise<{theme:Theme;version:number;template:string}>=>{
-    setClientPlatform(platform);
-    const runtime=await clientRequest<{config:Partial<Theme>;version:number}>('bootstrap','GET',undefined,platform);
+    setClientPlatform(platform);const current=captureConfigurationRequest();
+    const runtime=await clientRequest<{config:Partial<Theme>;version:number;application?:PublicApplication;danmu?:Parameters<typeof receiveDanmu>[0]}>('bootstrap','GET',undefined,platform);
+    current();receiveApplication(runtime.application);receiveDanmu(runtime.danmu);
     return {theme:normalizeTheme({...defaults,...runtime.config,carousel:{...defaults.carousel,...runtime.config.carousel}} as Theme),version:runtime.version,template:'bundled-client'};
   },
   setup:()=>request<SetupStatus>('/api/admin/setup'),
@@ -59,17 +65,21 @@ export const api={
   renameTemplate:(template:string,name:string,version:number)=>request<StudioState>('/api/admin/template/rename','PUT',{template,name,version}),
   removeTemplate:(template:string,version:number,unpublish:boolean)=>request<StudioState>('/api/admin/template/remove','POST',{template,version,unpublish}),
   asset:(name:string,data:string)=>request<{url:string}>('/api/admin/asset','POST',{name,data}),
-  playback:(id:string,sid:number,nid:number)=>clientRequest<{url:string;name:string}>('playback','POST',{id,sid,nid}),
+  playback:async(id:string,sid:number,nid:number)=>{const current=captureMemberContext();const result=await clientRequest<{url:string;name:string;sourceCode?:string;trialSeconds?:number}>('playback','POST',{id,sid,nid});current();return result;},
   cmsStatus:()=>request<CmsStatus>('/api/admin/cms/status'),
   checkCms:(base:string)=>request<CmsStatus>('/api/admin/cms/check','POST',{base}),
   cms:(base:string,siteId?:string)=>request<StudioState & {cmsStatus:CmsStatus}>('/api/admin/cms','PUT',{base,siteId})
 };
 
+export function assertMemberContext(service:string,source:string,token:unknown){
+ if(service!==getServiceBase()||source!==applicationRuntime.sourceKey||token!==uni.getStorageSync('hetun-member-token'))throw new Error('账号或站点已切换，请重新操作。');
+}
+export function captureMemberContext(){const service=getServiceBase(),source=applicationRuntime.sourceKey,token=uni.getStorageSync('hetun-member-token');return ()=>assertMemberContext(service,source,token);}
 export const memberApi={
  checkout:(orderId:number,code:string,payment:string,platform:string)=>clientRequest<any>('member/checkout','POST',{orderId,code,payment,platform}),
- config:()=>clientRequest<any>('member/config'),plans:()=>clientRequest<any>('member/plans'),profile:()=>clientRequest<any>('member/profile'),
- login:async(username:string,password:string,register=false,password2='')=>{const v=await clientRequest<any>('member/'+(register?'register':'login'),'POST',{username,password,password2});uni.setStorageSync('hetun-member-token',v.token);return v;},
- logout:async()=>{await clientRequest('member/logout','POST',{});uni.removeStorageSync('hetun-member-token');},
+ config:()=>clientRequest<any>('member/config'),plans:()=>clientRequest<any>('member/plans'),profile:async()=>{const service=getServiceBase(),source=applicationRuntime.sourceKey,token=uni.getStorageSync('hetun-member-token');const v=await clientRequest<any>('member/profile');assertMemberContext(service,source,token);receiveMember(v.profile,service,source);return v;},
+ login:async(username:string,password:string,register=false,password2='',captcha:CaptchaInput={},invite='')=>{const service=getServiceBase(),source=applicationRuntime.sourceKey,token=uni.getStorageSync('hetun-member-token');const v=await clientRequest<any>('member/'+(register?'register':'login'),'POST',{username,password,password2,...captcha,inviteCode:invite});assertMemberContext(service,source,token);if(typeof v.token==='string'&&v.token){uni.setStorageSync('hetun-member-token',v.token);receiveMember(v.profile,service,source);}return v;},
+ logout:async()=>{const service=getServiceBase(),source=applicationRuntime.sourceKey,token=uni.getStorageSync('hetun-member-token');await clientRequest('member/logout','POST',{});assertMemberContext(service,source,token);uni.removeStorageSync('hetun-member-token');receiveMember(null,service,source);},
  orders:()=>clientRequest<any>('member/orders'),order:(code:string)=>clientRequest<any>('member/order?code='+encodeURIComponent(code)),
  purchase:(groupId:number,period:string,platform:string)=>clientRequest<any>('member/purchase','POST',{groupId,period,platform}),
  upgrade:(groupId:number,period:string)=>clientRequest<any>('member/upgrade','POST',{groupId,period}),recharge:(price:number,platform:string)=>clientRequest<any>('member/recharge','POST',{price,platform})
@@ -131,7 +141,7 @@ export interface ClientStatisticsReport {
 }
 export const clientStatisticsApi={get:(platform:Platform)=>adminClientRequest<ClientStatisticsReport>(platform,'statistics')};
 
-export interface PlaybackResolverSource {id:string;name:string;kind:'json'|'redirect';endpoint:string;urlField:string;enabled:boolean;platforms:Platform[];}
+export interface PlaybackResolverSource {id:string;name:string;kind:'json'|'redirect';endpoint:string;urlField:string;enabled:boolean;platforms:Platform[];userAgent?:string;headers?:Record<string,string>;}
 export interface PlaybackResolverConfig {enabled:boolean;directFirst:boolean;timeoutSeconds:number;totalSeconds:number;maxAttempts:number;sources:PlaybackResolverSource[];}
 export interface PlaybackResolverSettings {revision:number;publishedVersion:number;publishedAt:string;draft:PlaybackResolverConfig;published:PlaybackResolverConfig;}
 export interface ResolverAttempt {id:string;name:string;ok:boolean;elapsedMs:number;message:string;}

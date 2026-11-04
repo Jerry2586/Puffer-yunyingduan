@@ -101,6 +101,8 @@ func TestCarouselsInvalidApplyIsAtomic(t *testing.T) {
 		}},
 		{"duplicate owner", func(d M) { obj(arr(d["carouselGroups"])[1])["entryIds"] = []any{"movie-nav"} }},
 		{"unknown entry", func(d M) { obj(arr(d["carouselGroups"])[0])["entryIds"] = []any{"1"} }},
+		{"invalid name mode", func(d M) { obj(arr(d["carouselGroups"])[0])["nameMode"] = "invalid" }},
+		{"non-string name mode", func(d M) { obj(arr(d["carouselGroups"])[0])["nameMode"] = M{"auto": true} }},
 		{"stale page", func(d M) { carouselTestSlide(d)["target"] = M{"type": "page", "pageId": "deleted"} }},
 		{"mixed target", func(d M) {
 			carouselTestSlide(d)["target"] = M{"type": "vod", "vodId": "1", "url": "https://example.com"}
@@ -188,6 +190,85 @@ func TestCarouselsEnabledWithoutActiveSlidesPersist(t *testing.T) {
 		saved := obj(arr(obj(response["config"])["carouselGroups"])[0])
 		if saved["enabled"] != true || len(arr(saved["slides"])) != len(slides) {
 			t.Fatal("empty group switch lost", saved)
+		}
+	}
+}
+
+func TestCarouselsNamesFollowBindingAndPreserveCustomAcrossRestart(t *testing.T) {
+	cms := fixtureCMS(t)
+	defer cms.Close()
+	h := newHarness(t, cms.URL)
+	d := carouselDraft()
+	first := obj(arr(d["carouselGroups"])[0])
+	first["name"], first["nameMode"] = "新轮播组", "auto"
+	canonical, err := operationConfig(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalSlides := clone(obj(arr(canonical["carouselGroups"])[0])["slides"])
+	for i, tc := range []struct {
+		name string
+		mode string
+		edit func(M)
+	}{
+		{"电影轮播组", "auto", func(M) {}},
+		{"首页轮播组", "auto", func(d M) { obj(arr(d["categories"])[0])["label"] = "首页" }},
+		{"精选电影轮播组", "auto", func(d M) {
+			second := obj(arr(d["carouselGroups"])[1])
+			second["entryIds"], second["enabled"] = []any{}, false
+			obj(arr(d["carouselGroups"])[0])["entryIds"] = []any{"second-nav"}
+		}},
+		{"本周精选", "custom", func(d M) { g := obj(arr(d["carouselGroups"])[0]); g["name"], g["nameMode"] = "本周精选", "custom" }},
+		{"本周精选", "custom", func(d M) { obj(arr(d["carouselGroups"])[0])["entryIds"] = []any{"movie-nav"} }},
+		{"本周精选", "custom", func(d M) { g := obj(arr(d["carouselGroups"])[0]); g["entryIds"], g["enabled"] = []any{}, false }},
+	} {
+		tc.edit(d)
+		w := h.req("PUT", "/api/admin/clients/mobile/apply", M{"version": i + 1, "theme": d}, "")
+		if w.Code != 200 {
+			t.Fatal(i, w.Code, w.Body)
+		}
+		restarted, err := newApp(context.Background(), h.a.config, h.a.store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := bootstrap(restarted.readState(), "mobile", "android", "", h.origin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := obj(arr(obj(response["config"])["carouselGroups"])[0])
+		if saved["name"] != tc.name || saved["nameMode"] != tc.mode {
+			t.Fatal(i, "name lost after apply/restart", saved)
+		}
+		if !reflect.DeepEqual(saved["slides"], originalSlides) {
+			t.Fatal("name change altered slides")
+		}
+		d = clone(h.a.readState().Operations["mobile"].Draft)
+	}
+}
+
+func TestCarouselsLegacyNameModesAndLongLabels(t *testing.T) {
+	for _, tc := range []struct{ name, mode, expected, expectedMode, label string }{
+		{"新轮播组", "", "电影轮播组", "auto", "电影"},
+		{"电影轮播组", "", "电影轮播组", "auto", "电影"},
+		{"自定义专题", "", "自定义专题", "custom", "电影"},
+		{"电影轮播组", "custom", "电影轮播组", "custom", "电影"},
+		{"新轮播组", "auto", strings.Repeat("影", 77) + "轮播组", "auto", strings.Repeat("影", 100)},
+		{"新轮播组", "auto", strings.Repeat("𠮷", 57) + "轮播组", "auto", strings.Repeat("𠮷", 100)},
+	} {
+		d := carouselDraft()
+		obj(arr(d["categories"])[0])["label"] = tc.label
+		g := obj(arr(d["carouselGroups"])[0])
+		g["name"] = tc.name
+		if tc.mode != "" {
+			g["nameMode"] = tc.mode
+		}
+		out, err := operationConfig(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := obj(arr(out["carouselGroups"])[0])
+		if saved["name"] != tc.expected || saved["nameMode"] != tc.expectedMode || len(str(saved["name"])) > 240 {
+			t.Fatal("incorrect name migration", saved)
 		}
 	}
 }

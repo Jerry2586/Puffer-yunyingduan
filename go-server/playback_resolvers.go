@@ -15,13 +15,15 @@ import (
 // Resolver order is explicit. Credentials stay in the admin-only endpoint;
 // public responses expose neither endpoint URLs nor upstream response bodies.
 type playbackSource struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Kind      string   `json:"kind"`
-	Endpoint  string   `json:"endpoint"`
-	URLField  string   `json:"urlField"`
-	Enabled   bool     `json:"enabled"`
-	Platforms []string `json:"platforms"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Kind      string            `json:"kind"`
+	Endpoint  string            `json:"endpoint"`
+	URLField  string            `json:"urlField"`
+	Enabled   bool              `json:"enabled"`
+	Platforms []string          `json:"platforms"`
+	UserAgent string            `json:"userAgent,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 type playbackConfig struct {
 	Enabled        bool             `json:"enabled"`
@@ -84,6 +86,17 @@ func validatePlayback(c playbackConfig) error {
 			return problem(400, "解析来源标识重复或名称无效")
 		}
 		ids[s.ID] = true
+		if len(s.UserAgent) > 512 || strings.ContainsAny(s.UserAgent, "\r\n\x00") || len(s.Headers) > 8 {
+			return problem(400, "解析请求 UA 或请求头无效")
+		}
+		seenHeaders := map[string]bool{}
+		for name, value := range s.Headers {
+			key := http.CanonicalHeaderKey(name)
+			if !has([]string{"Accept", "Accept-Language", "Referer", "Origin", "X-Requested-With"}, key) || seenHeaders[key] || len(value) > 2048 || strings.ContainsAny(value, "\r\n\x00") {
+				return problem(400, "仅支持 Accept、Accept-Language、Referer、Origin、X-Requested-With 请求头，不允许重复或换行")
+			}
+			seenHeaders[key] = true
+		}
 		if !has([]string{"json", "redirect"}, s.Kind) {
 			return problem(400, "解析类型只支持 JSON 或 HTTP 跳转")
 		}
@@ -263,6 +276,8 @@ func (a *app) resolvePlayback(ctx context.Context, c playbackConfig, raw, p stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.TotalSeconds)*time.Second)
 	defer cancel()
+	deadline, _ := ctx.Deadline()
+	exhausted := func() bool { return ctx.Err() != nil || !time.Now().Before(deadline) }
 	consumed := 0
 	for _, id := range excluded {
 		if id != "direct" {
@@ -273,7 +288,7 @@ func (a *app) resolvePlayback(ctx context.Context, c playbackConfig, raw, p stri
 		if !s.Enabled || !has(s.Platforms, p) || has(excluded, s.ID) {
 			continue
 		}
-		if consumed+len(result.Attempts) >= c.MaxAttempts || ctx.Err() != nil {
+		if consumed+len(result.Attempts) >= c.MaxAttempts || exhausted() {
 			break
 		}
 		started := time.Now()
@@ -292,7 +307,7 @@ func (a *app) resolvePlayback(ctx context.Context, c playbackConfig, raw, p stri
 		}
 	}
 	result.Message = "没有可用解析结果：请检查来源、客户端范围或尝试上限"
-	if ctx.Err() != nil {
+	if exhausted() {
 		result.Message = "解析已达到总时限或请求已取消"
 	}
 	return result, nil
@@ -305,6 +320,12 @@ func (a *app) callPlaybackResolver(ctx context.Context, s playbackSource, raw st
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Hetun-Playback/1")
+	if s.UserAgent != "" {
+		req.Header.Set("User-Agent", s.UserAgent)
+	}
+	for key, value := range s.Headers {
+		req.Header.Set(key, value)
+	}
 	// Reuse outbound limits, DNS/IP checks and no-redirect policy; no member/admin cookies.
 	response, e := a.cms.Do(req)
 	if e != nil {

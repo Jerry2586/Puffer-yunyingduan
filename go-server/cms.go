@@ -349,7 +349,7 @@ func normalizeVod(v M, base string) M {
 			if i < len(labels) && labels[i] != "" {
 				name = labels[i]
 			}
-			sources = append(sources, M{"name": name, "episodes": episodes})
+			sources = append(sources, M{"name": name, "code": name, "sid": i + 1, "episodes": episodes})
 		}
 	}
 	out["sources"] = sources
@@ -357,6 +357,46 @@ func normalizeVod(v M, base string) M {
 }
 
 var digits = regexp.MustCompile(`^\d+$`)
+
+type catalogLimitKey struct{}
+
+// Remap the client page to CMS rows so a smaller page never skips titles.
+func (a *app) catalogPage(ctx context.Context, base string, params url.Values, page, limit int) (M, error) {
+	params.Set("pg", "1")
+	first, err := a.cachedCatalog(ctx, base, params)
+	if err != nil {
+		return nil, err
+	}
+	sourceSize := numericOr(first["limit"], len(arr(first["list"])))
+	if sourceSize < 1 {
+		return first, nil
+	}
+	size := min(sourceSize, limit)
+	total := numericOr(first["total"], len(arr(first["list"])))
+	start := (page - 1) * size
+	items := []any{}
+	end := min(start+size, total)
+	for pos := start; pos < end; {
+		cmsPage := pos/sourceSize + 1
+		raw := first
+		if cmsPage != 1 {
+			params.Set("pg", strconv.Itoa(cmsPage))
+			raw, err = a.cachedCatalog(ctx, base, params)
+			if err != nil {
+				return nil, err
+			}
+		}
+		list := arr(raw["list"])
+		offset := pos % sourceSize
+		count := min(end-pos, len(list)-offset)
+		if count <= 0 {
+			break
+		}
+		items = append(items, list[offset:offset+count]...)
+		pos += count
+	}
+	return M{"list": items, "page": page, "pagecount": max(1, (total+size-1)/size), "total": total}, nil
+}
 
 func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error) {
 	if len(q.Get("keyword")) > 300 || len(q.Get("category")) > 60 || len(q.Get("ids")) > 1500 {
@@ -394,7 +434,14 @@ func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error)
 			return result, nil
 		}
 	}
-	raw, e := a.cachedCatalog(ctx, base, url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}})
+	params := url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}}
+	var raw M
+	var e error
+	if limit, _ := ctx.Value(catalogLimitKey{}).(int); limit > 0 && len(ids) == 0 {
+		raw, e = a.catalogPage(ctx, base, params, page, limit)
+	} else {
+		raw, e = a.cachedCatalog(ctx, base, params)
+	}
 	if e != nil {
 		return nil, e
 	}

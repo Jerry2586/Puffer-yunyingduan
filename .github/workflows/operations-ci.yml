@@ -57,6 +57,8 @@ jobs:
         with:
           go-version-file: go-server/go.mod
           cache-dependency-path: go-server/go.sum
+      - name: Check CMS management adapter syntax
+        run: php -l go-server/cms/Hetunops.php
       - name: Install locked dependencies outside source
         shell: bash
         run: |
