@@ -40,7 +40,8 @@ defineExpose({prepareToLeave});
     <view class="settings-row"><view><text class="settings-label">每页列表上限</text><text class="settings-help">每次最多读取 1–100 条影片。</text></view><input class="settings-control narrow" v-model.number="c.application.listLimit" type="number" min="1" max="100" aria-label="每页列表上限"/></view>
     <view class="settings-row"><view><text class="settings-label">搜索索引同步间隔</text><text class="settings-help">单位分钟，0 关闭；定时重建内容快照，支持 1–1440 分钟。</text></view><input class="settings-control narrow" v-model.number="c.search.intervalMinutes" type="number" min="0" max="1440" aria-label="搜索索引同步间隔"/></view>
     <view class="settings-row"><view><text class="settings-label">电视端下载链接</text><text class="settings-help">供个人中心显示下载入口。</text></view><input class="settings-control" v-model="c.application.tvDownloadUrl" placeholder="https://…" maxlength="2048" aria-label="电视端下载链接"/></view>
-    <text class="settings-help">VPN 检测和电视端原生下载需要对应客户端支持，当前服务不提供这两项原生能力。</text>
+    <view class="settings-row"><view><text class="settings-label">VPN 检测提醒</text><text class="settings-help">Android 客户端检测到 VPN 连接时提醒用户，不阻止使用。默认关闭；网页预览不执行系统网络检测。</text></view><switch :checked="!!c.application.vpnDetection" @change="c.application.vpnDetection=checked($event)" aria-label="VPN 检测提醒"/></view>
+    <text class="settings-help">电视端原生下载仍需对应客户端支持。</text>
    </view>
    <template v-if="section==='registration'">
    <view class="settings-card"><text class="settings-card-title">注册规则</text><text class="settings-card-description">会员资料保存到当前绑定的苹果 CMS。</text>

@@ -150,6 +150,9 @@ func (a *app) catalogRaw(ctx context.Context, base string, params url.Values) (M
 	if root := a.localRootFor(base); root != "" {
 		return a.localCatalog(ctx, root, params)
 	}
+	if params.Get("orderBy") == "hot" && params.Get("ids") == "" {
+		return nil, coded(409, "当前 HTTP 内容源未提供全库热度排序，请在内容源与连接中使用本地只读 CMS 连接", "CMS_HOT_SORT_UNAVAILABLE")
+	}
 	return a.httpCatalog(ctx, base, params)
 }
 func (a *app) httpCatalog(ctx context.Context, base string, params url.Values) (M, error) {
@@ -406,8 +409,8 @@ func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error)
 	if order == "" {
 		order = "latest"
 	}
-	if !has([]string{"latest", "manual", "score"}, order) {
-		return nil, problem(400, "不支持全库热度排序或该排序方式")
+	if !has([]string{"latest", "manual", "score", "hot"}, order) {
+		return nil, problem(400, "不支持该排序方式")
 	}
 	ids := []string{}
 	for _, id := range strings.Split(q.Get("ids"), ",") {
@@ -429,12 +432,15 @@ func (a *app) catalog(ctx context.Context, base string, q url.Values) (M, error)
 	if page > 10000 {
 		page = 10000
 	}
-	if strings.TrimSpace(q.Get("keyword")) != "" && len(ids) == 0 {
+	if order != "hot" && strings.TrimSpace(q.Get("keyword")) != "" && len(ids) == 0 {
 		if result, ok := a.indexedCatalog(ctx, base, q, page); ok {
 			return result, nil
 		}
 	}
 	params := url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}, "wd": {q.Get("keyword")}, "t": {q.Get("category")}, "ids": {strings.Join(ids, ",")}}
+	if order == "hot" && len(ids) == 0 {
+		params.Set("orderBy", "hot")
+	}
 	var raw M
 	var e error
 	if limit, _ := ctx.Value(catalogLimitKey{}).(int); limit > 0 && len(ids) == 0 {

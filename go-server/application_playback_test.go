@@ -528,3 +528,49 @@ func TestRetiredSearchJobCannotOverwriteNewSnapshot(t *testing.T) {
 		t.Fatal("retired job overwrote current state")
 	}
 }
+
+func TestVPNPolicyDefaultsAndSharedBootstrapRefresh(t *testing.T) {
+	cms := fixtureCMS(t)
+	defer cms.Close()
+	h := newHarness(t, cms.URL)
+	cfg := defaultApplicationConfig()
+	if cfg.Application.VPNDetection {
+		t.Fatal("VPN detection must default off")
+	}
+	// Warm bootstrap caching before changing settings: application policy has its own version.
+	for _, platform := range []string{"mobile", "tablet", "tv", "desktop"} {
+		out := payload(t, h.req("GET", "/api/v1/"+platform+"/bootstrap", nil, ""))
+		if obj(out["application"])["vpnDetection"] != false {
+			t.Fatalf("initial %s policy: %v", platform, out["application"])
+		}
+	}
+	for i, enabled := range []bool{true, false} {
+		cfg.Application.VPNDetection = enabled
+		saved := h.req("POST", "/api/admin/application-settings", M{"version": i, "config": cfg}, "")
+		if saved.Code != 200 {
+			t.Fatalf("save policy: %d %s", saved.Code, saved.Body)
+		}
+		if applicationState(h.a.readState()).Config.Application.VPNDetection != enabled {
+			t.Fatal("policy was not persisted in state")
+		}
+		for _, platform := range []string{"mobile", "tablet", "tv", "desktop"} {
+			for _, route := range []string{"application/config", "bootstrap"} {
+				out := payload(t, h.req("GET", "/api/v1/"+platform+"/"+route, nil, ""))
+				if route == "bootstrap" {
+					out = obj(out["application"])
+				}
+				if out["vpnDetection"] != enabled || number(out["version"]) != i+1 {
+					t.Fatalf("%s %s stale policy: %v", platform, route, out)
+				}
+				if obj(out["capabilities"])["vpnDetection"] != true {
+					t.Fatal("missing VPN capability")
+				}
+			}
+		}
+	}
+	// Older stored configs that omit the new field remain opt-out.
+	var old applicationConfig
+	if err := json.Unmarshal([]byte(`{"application":{"searchDelayMs":350,"listLimit":50}}`), &old); err != nil || old.Application.VPNDetection {
+		t.Fatal("legacy policy must be off", err)
+	}
+}

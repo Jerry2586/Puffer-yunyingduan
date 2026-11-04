@@ -17,6 +17,7 @@ import (
 
 type applicationConfig struct {
 	Application struct {
+		VPNDetection  bool   `json:"vpnDetection"`
 		SearchDelayMS int    `json:"searchDelayMs"`
 		ListLimit     int    `json:"listLimit"`
 		TVDownloadURL string `json:"tvDownloadUrl"`
@@ -152,7 +153,7 @@ func validateApplicationConfig(c applicationConfig) error {
 }
 func applicationReport(v state) M {
 	s := applicationState(v)
-	return M{"version": s.Version, "updatedAt": s.UpdatedAt, "config": s.Config, "source": managementBase(v.CMSBase), "adapterConfigured": v.ManagementConnection != nil && v.ManagementConnection.Base == managementBase(v.CMSBase) && v.ManagementConnection.Key != "", "capabilities": M{"vpnDetection": false, "history": true, "captcha": true, "searchSync": "full-snapshot", "nativeTVDownload": false}}
+	return M{"version": s.Version, "updatedAt": s.UpdatedAt, "config": s.Config, "source": managementBase(v.CMSBase), "adapterConfigured": v.ManagementConnection != nil && v.ManagementConnection.Base == managementBase(v.CMSBase) && v.ManagementConnection.Key != "", "capabilities": M{"vpnDetection": true, "vpnDetectionPlatforms": []string{"android"}, "history": true, "captcha": true, "searchSync": "full-snapshot", "nativeTVDownload": false}}
 }
 func (a *app) adminApplication(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == "GET" {
@@ -212,7 +213,7 @@ func publicApplication(v state, p string) M {
 		tv = c.Application.TVDownloadURL
 	}
 	sourceHash := sha256.Sum256([]byte(managementBase(v.CMSBase)))
-	return M{"sourceKey": hex.EncodeToString(sourceHash[:12]), "version": s.Version, "searchDelayMs": c.Application.SearchDelayMS, "listLimit": c.Application.ListLimit, "tvDownloadUrl": tv, "registrationEnabled": c.Registration.Enabled, "captcha": c.Captcha, "history": c.History, "avatar": c.Avatar, "share": c.Share, "comments": c.Comments, "membership": c.Membership, "capabilities": M{"vpnDetection": false, "nativeTVDownload": false}}
+	return M{"sourceKey": hex.EncodeToString(sourceHash[:12]), "version": s.Version, "vpnDetection": c.Application.VPNDetection, "searchDelayMs": c.Application.SearchDelayMS, "listLimit": c.Application.ListLimit, "tvDownloadUrl": tv, "registrationEnabled": c.Registration.Enabled, "captcha": c.Captcha, "history": c.History, "avatar": c.Avatar, "share": c.Share, "comments": c.Comments, "membership": c.Membership, "capabilities": M{"vpnDetection": true, "vpnDetectionPlatforms": []string{"android"}, "nativeTVDownload": false}}
 }
 func requestIP(r *http.Request) string {
 	host, _, e := net.SplitHostPort(r.RemoteAddr)

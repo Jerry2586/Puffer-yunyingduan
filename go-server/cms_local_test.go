@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -87,22 +88,32 @@ func TestCMSLocalReadWithPublicAPIOff(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer db.Exec("DROP TABLE " + typ)
-	if _, e = db.Exec("CREATE TABLE " + vod + " (vod_id INT PRIMARY KEY,type_id INT,type_id_1 INT,vod_status INT,vod_time INT,vod_name VARCHAR(80),vod_pic TEXT,vod_year TEXT,vod_area TEXT,vod_score TEXT,vod_actor TEXT,vod_director TEXT,vod_remarks TEXT,vod_state TEXT,vod_content TEXT,vod_blurb TEXT,vod_play_from TEXT,vod_play_url TEXT)"); e != nil {
+	if _, e = db.Exec("CREATE TABLE " + vod + " (vod_id INT PRIMARY KEY,type_id INT,type_id_1 INT,vod_status INT,vod_time INT,vod_hits BIGINT,vod_name VARCHAR(80),vod_pic TEXT,vod_year TEXT,vod_area TEXT,vod_score TEXT,vod_actor TEXT,vod_director TEXT,vod_remarks TEXT,vod_state TEXT,vod_content TEXT,vod_blurb TEXT,vod_play_from TEXT,vod_play_url TEXT)"); e != nil {
 		t.Fatal(e)
 	}
 	defer db.Exec("DROP TABLE " + vod)
-	if _, e = db.Exec("INSERT INTO " + typ + " VALUES (1,0,'电影',1,1,0),(2,0,'隐藏分类',1,0,0)"); e != nil {
+	if _, e = db.Exec("INSERT INTO " + typ + " VALUES (1,0,'电影',1,1,0),(2,0,'隐藏分类',1,0,0),(3,1,'动作片',1,1,1)"); e != nil {
 		t.Fatal(e)
 	}
 	for i := 1; i <= 25; i++ {
 		status, category := 1, 1
+		if i%2 == 0 {
+			category = 3
+		}
+		hits := (26 - i) * 10
+		if i <= 2 {
+			hits = 1000
+		}
+		if i >= 24 {
+			hits = 10000
+		}
 		if i == 24 {
 			status = 0
 		}
 		if i == 25 {
 			category = 2
 		}
-		if _, e = db.Exec("INSERT INTO "+vod+" VALUES (?,?,1,?,?,?,'','','','9','','','','','','','line','正片$https://private.invalid/video')", i, category, status, i, fmt.Sprintf("电影%d", i)); e != nil {
+		if _, e = db.Exec("INSERT INTO "+vod+" VALUES (?,?,1,?,?,?,?,'','','','9','','','','','','','line','正片$https://private.invalid/video')", i, category, status, i, hits, fmt.Sprintf("电影%d", i)); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -145,6 +156,81 @@ func TestCMSLocalReadWithPublicAPIOff(t *testing.T) {
 	if e != nil || obj(arr(result["items"])[0])["id"] != "2" {
 		t.Fatal("manual ids", result, e)
 	}
+	checkIDs := func(result M, want string) {
+		t.Helper()
+		got := []string{}
+		for _, item := range arr(result["items"]) {
+			got = append(got, str(obj(item)["id"]))
+		}
+		if strings.Join(got, ",") != want {
+			t.Fatalf("catalog order: got %v, want %s", got, want)
+		}
+	}
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}})
+	if e != nil || result["total"] != 23 || result["pages"] != 2 {
+		t.Fatal("hot catalog", result, e)
+	}
+	checkIDs(result, "2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20")
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "page": {"2"}})
+	if e != nil {
+		t.Fatal("hot pagination", e)
+	}
+	checkIDs(result, "21,22,23")
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "category": {"1"}})
+	if e != nil || result["total"] != 23 {
+		t.Fatal("hot parent category", result, e)
+	}
+	checkIDs(result, "2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20")
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "category": {"3"}})
+	if e != nil || result["total"] != 11 {
+		t.Fatal("hot child category", result, e)
+	}
+	checkIDs(result, "2,4,6,8,10,12,14,16,18,20,22")
+	// A recent search snapshot has no hit counts and cannot answer hot queries.
+	h.a.searchMu.Lock()
+	if h.a.searchIndexes == nil {
+		h.a.searchIndexes = map[string]*searchIndex{}
+	}
+	h.a.searchIndexes["mobile"] = &searchIndex{Source: h.a.searchSource(cms.URL), BuiltAt: time.Now(), Documents: []searchDocument{{Item: M{"id": "999", "categoryId": "1"}, Text: "电影"}}}
+	h.a.searchMu.Unlock()
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "keyword": {"电影"}})
+	if e != nil || result["total"] != 23 || result["searchSource"] == "local-index" {
+		t.Fatal("hot keyword used stale ordering", result, e)
+	}
+	checkIDs(result, "2,1,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20")
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "keyword": {"电影2"}, "category": {"3"}})
+	if e != nil || result["total"] != 3 {
+		t.Fatal("hot keyword and category filters", result, e)
+	}
+	checkIDs(result, "2,20,22")
+	h.a.searchMu.Lock()
+	delete(h.a.searchIndexes, "mobile")
+	h.a.searchMu.Unlock()
+	limited := context.WithValue(context.Background(), catalogLimitKey{}, 7)
+	result, e = h.a.catalog(limited, cms.URL, url.Values{"orderBy": {"hot"}, "page": {"3"}})
+	if e != nil || result["total"] != 23 || result["pages"] != 4 {
+		t.Fatal("hot client pagination", result, e)
+	}
+	checkIDs(result, "15,16,17,18,19,20,21")
+	result, e = h.a.catalog(limited, cms.URL, url.Values{"orderBy": {"hot"}, "page": {"4"}})
+	if e != nil {
+		t.Fatal("hot client last page", e)
+	}
+	checkIDs(result, "22,23")
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{})
+	if e != nil || obj(arr(result["items"])[0])["id"] != "23" {
+		t.Fatal("latest order changed", result, e)
+	}
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "ids": {"1,2"}})
+	if e != nil {
+		t.Fatal("explicit hot IDs", e)
+	}
+	checkIDs(result, "1,2")
+	w := h.req("GET", "/api/catalog?orderBy=hot&category=3", nil, "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), "private.invalid") {
+		t.Fatal("public hot catalog or playback URL boundary", w.Code, w.Body)
+	}
+	checkIDs(payload(t, w), "2,4,6,8,10,12,14,16,18,20,22")
 	for _, keyword := range []string{"%", "' OR 1=1 --"} {
 		result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"keyword": {keyword}})
 		if e != nil || len(arr(result["items"])) != 0 {
@@ -191,6 +277,27 @@ func TestCMSLocalReadWithPublicAPIOff(t *testing.T) {
 			t.Fatal("selection reverted to stale domain", chosen, err)
 		}
 	})
+
+	if _, e = db.Exec("ALTER TABLE " + vod + " DROP COLUMN vod_hits"); e != nil {
+		t.Fatal(e)
+	}
+	w = h.req("GET", "/api/catalog?orderBy=hot", nil, "")
+	if w.Code != 409 || payload(t, w)["code"] != "CMS_HOT_SORT_UNAVAILABLE" || strings.Contains(w.Body.String(), prefix) {
+		t.Fatal("missing heat capability", w.Code, w.Body)
+	}
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{})
+	if e != nil || result["total"] != 23 || obj(arr(result["items"])[0])["id"] != "23" {
+		t.Fatal("missing heat broke latest", result, e)
+	}
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"score"}})
+	if e != nil || result["total"] != 23 {
+		t.Fatal("missing heat broke score", result, e)
+	}
+	result, e = h.a.catalog(context.Background(), cms.URL, url.Values{"orderBy": {"hot"}, "ids": {"1,2"}})
+	if e != nil {
+		t.Fatal("explicit IDs required heat capability", e)
+	}
+	checkIDs(result, "1,2")
 
 	if requests.Load() != 0 {
 		t.Fatal("local reads depended on public API")

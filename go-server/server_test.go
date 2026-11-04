@@ -257,8 +257,16 @@ func TestCatalogAndMembership(t *testing.T) {
 	if w.Code != 200 || len(items) != 2 || obj(items[0])["id"] != "2" || strings.Contains(w.Body.String(), "secret.test") {
 		t.Fatal(w.Code, w.Body)
 	}
-	if w = h.req("GET", "/api/catalog?orderBy=hot", nil, ""); w.Code != 400 {
-		t.Fatal(w.Code)
+	if w = h.req("GET", "/api/catalog?orderBy=hot", nil, ""); w.Code != 409 || payload(t, w)["code"] != "CMS_HOT_SORT_UNAVAILABLE" {
+		t.Fatal(w.Code, w.Body)
+	}
+	w = h.req("GET", "/api/catalog?orderBy=hot&ids=1,2", nil, "")
+	items = arr(payload(t, w)["items"])
+	if w.Code != 200 || len(items) != 2 || obj(items[0])["id"] != "1" {
+		t.Fatal("explicit IDs must retain their order", w.Code, w.Body)
+	}
+	if w = h.req("GET", "/api/catalog?orderBy=unknown", nil, ""); w.Code != 400 {
+		t.Fatal("unknown catalog order accepted", w.Code)
 	}
 	if w = h.req("POST", "/api/playback", M{"id": "1", "sid": 1, "nid": 1}, ""); w.Code == 200 {
 		t.Fatal("anonymous playback allowed")
