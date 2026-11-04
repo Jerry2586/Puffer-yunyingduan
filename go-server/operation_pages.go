@@ -60,6 +60,15 @@ func operationPages(input, out M) error {
 				return problem(400, "页面所属一级分类编号无效")
 			}
 		}
+		if value, exists := page["carouselAppearance"]; exists {
+			appearance, err := operationCarouselAppearance(value)
+			if err != nil {
+				return err
+			}
+			if len(appearance) > 0 {
+				n["carouselAppearance"] = appearance
+			}
+		}
 		byID[id] = n
 		clean = append(clean, n)
 	}

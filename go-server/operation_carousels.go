@@ -2,7 +2,7 @@ package main
 
 import "strings"
 
-// Carousel content is operations-owned; geometry and artwork styling stay in the theme.
+// Carousel groups own content and bindings; bounded geometry overrides belong to content pages.
 // Entry IDs refer to APP primary navigation identities, never CMS source category IDs.
 func operationCarousels(input, out M) error {
 	raw, exists := input["carouselGroups"]

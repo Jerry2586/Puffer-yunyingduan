@@ -1,7 +1,8 @@
 export interface LayoutAppearance { [key:string]:string|number|undefined }
 export type Platform = 'mobile'|'tablet'|'tv'|'web';
 export type AppPage = 'home'|'category'|'search'|'shortdrama'|'member'|'mine'|'ranking'|'schedule'|'library'|'history'|'settings'|'disclaimer'|'privacy'|'about';
-export interface ContentPage {primaryEntryId?:string;id:string;title:string;kind:'category'|'campaign'|'blank'|'custom';categoryId:string;enabled:boolean;carouselEnabled:boolean}
+export interface ContentPage {primaryEntryId?:string;id:string;title:string;kind:'category'|'campaign'|'blank'|'custom';categoryId:string;enabled:boolean;carouselEnabled:boolean;carouselAppearance?:CarouselAppearance}
+export interface CarouselAppearance {style?:'full'|'inset'|'peek'|'poster'|'split';widthPercent?:number;height?:number;radius?:number;margin?:number;fit?:'cover'|'contain'}
 export interface NavigationStyle {fontSize?:number;color?:string;activeColor?:string}
 export type NavigationDisplay = 'text'|'icon'|'both';
 export interface CategoryShortcut {id:'all'|'ranking'|'schedule'|'search';label:string;enabled:boolean;display?:NavigationDisplay;iconKey?:string}

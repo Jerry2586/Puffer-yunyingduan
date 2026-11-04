@@ -6,6 +6,7 @@ import OperationsNavigationEditor from './OperationsNavigationEditor.vue';
 import CmsCategoryBinding from './CmsCategoryBinding.vue';
 import EditorChoice from './EditorChoice.vue';
 import OperationsLayoutFields from './OperationsLayoutFields.vue';
+import OperationsCarouselAppearance from './OperationsCarouselAppearance.vue';
 import EntryTextColor from './EntryTextColor.vue';
 const props=defineProps<{theme:Theme;active:string;page:AppPage;pageId:string;categories:Category[];loadCategories:()=>Promise<Category[]>}>();
 const emit=defineEmits<{preview:[page:AppPage,pageId:string];message:[message:string];edit:[]}>();
@@ -140,6 +141,7 @@ const sorts=[{id:'latest',label:'最新更新'},{id:'score',label:'当前页评�
 <view class="switch-line"><text>显示这个栏目</text><switch :checked="selectedModule.enabled" @change="selectedModule.enabled=checked($event)"/></view><view class="actions"><button :disabled="modules.indexOf(selectedModule)===0" @click="moveModule(selectedModule.id,-1)">上移</button><button :disabled="modules.indexOf(selectedModule)===modules.length-1" @click="moveModule(selectedModule.id,1)">下移</button><button class="danger" @click="remove(theme.sections,selectedModule)">移除栏目</button></view></template><view v-else class="empty">选择左侧栏目进行编辑</view></view></view>
    </template>
    <template v-else>
+    <OperationsCarouselAppearance v-if="current" :key="current.id" v-model="current.carouselAppearance" :base="theme.carousel"/>
     <view class="section-header"><view><text class="section-title">已绑定轮播模块</text><text class="muted">引用轮播图中心的绑定；请前往轮播图中心编辑图片、跳转及开关。</text></view></view>
     <view class="item-list"><view v-for="g in boundCarousels" :key="g.id" class="list-row"><view class="row-copy"><text>{{g.name||'未命名轮播组'}}</text><text class="muted">{{g.entryIds.map(id=>theme.categories.find(e=>e.id===id)?.label||id).join('、')}} · {{g.slides.filter(s=>s.enabled).length}} 张已开启轮播</text></view><text class="status" :class="{off:!g.enabled}">{{g.enabled?'开启':'关闭'}}</text></view><view v-if="!boundCarousels.length" class="empty">暂未绑定轮播模块<text>在轮播图中心绑定本页对应的 APP 一级分类。</text></view></view>
    </template>

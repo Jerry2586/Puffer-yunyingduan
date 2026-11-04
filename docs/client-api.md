@@ -90,7 +90,8 @@ AdMob 服务商签名回调继续使用共享 `/api/ads/callback/admob`；不能
 - 每端最多40组、每组20条、合计200条，每组最多1个入口。组名1–240字节，标题最多240字节；影片编号为空或1–20位数字。组和条目都必须显式提供布尔开关。
 - 图片仅允许完整 HTTP(S) 地址或已有 `/api/assets/<64位小写十六进制哈希>.(png|jpg|webp)`；URL 最多2048字符，拒绝账号密码、空白、反斜线及脚本协议。外部目标遵守相同 HTTP(S) 约束。轮播图片不接收 MP4。
 - 新组和新条目默认关闭，允许保存尚未填完的草稿。开启组须绑定入口，允许空内容或所有条目关闭；关闭、删除最后一条内容不改变组开关。组内启用内容须有图片和完整点击目标。关闭状态不豁免非空字段的格式、引用和容量校验。公开配置可能含关闭内容，消费端应同时遵守组、入口、条目的开关。
-- 运营中心管理轮播内容、顺序、绑定和目标；宽高、裁切、位置等骨架几何与视觉字段不接受运营配置覆盖。
+- 轮播图中心管理内容、顺序、绑定和目标；页面编排管理当前内容页的轮播外观，可通过可选 `contentPages[].carouselAppearance` 覆盖主题默认。各页面独立，未提供的字段沿用主题；恢复默认时移除整个对象，空对象也会被归一化移除。不会修改 `carouselGroups` 的素材、跳转、绑定或开关。
+- `carouselAppearance` 仅接受：`style`（`full/inset/peek/poster/split`）、`fit`（`cover/contain`）、`widthPercent`（40–100）、`height`（120–600 px）、`margin`（0–48 px）、`radius`（0–300 px）。数字须为 JSON 整数；非法值拒绝整次保存，未知字段被丢弃。宽度按容器百分比减去左右外边距居中，圆角作用于轮播内容。示例：`{"id":"movies","title":"电影","kind":"category","categoryId":"2","enabled":true,"carouselEnabled":true,"carouselAppearance":{"style":"inset","widthPercent":90,"height":280,"radius":24,"margin":12,"fit":"cover"}}`。
 
 目录影片展示数据新增可选 `carouselImage`，来自苹果 CMS 的 `vod_pic_slide`，无有效轮播图时编辑器使用海报。直连 CMS 数据库缺少该可选列时回退原字段查询。目录接口继续隐藏播放地址，播放仍走既有授权接口。
 
