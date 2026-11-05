@@ -61,6 +61,7 @@ type attempt struct {
 	Start time.Time
 }
 type memberSession struct {
+	LegacyAPI      bool // guarded by Mu; learned from a successful legacy endpoint response
 	UserID         int
 	ProfileVersion atomic.Uint64
 	Jar            http.CookieJar

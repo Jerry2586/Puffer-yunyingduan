@@ -42,9 +42,19 @@ func (a *app) memberCall(ctx context.Context, s *memberSession, route, method st
 	if e != nil {
 		return nil, e
 	}
-	base.Path += route
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
+	// Select the legacy write endpoint before sending a mutation. Never retry a
+	// registration or points upgrade after an upstream write has been attempted.
+	if s.LegacyAPI {
+		switch route {
+		case "api.php/user/register":
+			route = "index.php/user/reg"
+		case "api.php/payment/upgrade":
+			route = "index.php/user/upgrade"
+		}
+	}
+	base.Path += route
 	v, e := cmsFetch(ctx, a.cms, base, method, params, s.Jar)
 	// Fall back only when a known newer route is absent. Authentication failures,
 	// malformed responses and server failures must not trigger a second attempt.
@@ -54,10 +64,15 @@ func (a *app) memberCall(ctx context.Context, s *memberSession, route, method st
 			"api.php/user/get_info":          "index.php/hetun/member_info",
 			"api.php/user/ajax_upgrade_data": "index.php/hetun/member_plans",
 			"api.php/user/login":             "index.php/user/login",
+			"api.php/order/get_list":         "index.php/hetun/member_orders",
+			"api.php/order/check_status":     "index.php/hetun/member_order",
 		}
 		if fallback := legacy[route]; fallback != "" {
 			base.Path = strings.TrimSuffix(base.Path, route) + fallback
 			v, e = cmsFetch(ctx, a.cms, base, method, params, s.Jar)
+			if e == nil && strings.HasPrefix(route, "api.php/user/") {
+				s.LegacyAPI = true
+			}
 		}
 	}
 	if e != nil {
@@ -254,6 +269,7 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 		}
 		jar, _ := cookiejar.New(nil)
 		s := &memberSession{Jar: jar, Base: v.CMSBase, Until: time.Now().Add(8 * time.Hour)}
+		registeredSession := false
 		if name == "register" {
 			if pass != str(input["password2"]) {
 				return problem(400, "两次输入的密码不一致")
@@ -282,7 +298,7 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 				}
 				_, e = a.managementCall(r.Context(), connection, "member.register", registrationMemberData(cfg, user, pass, requestIP(r), inviter))
 			} else {
-				_, e = a.memberCall(r.Context(), s, "api.php/user/register", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}, "user_pwd2": {str(input["password2"])}, "verify": {str(input["verify"])}})
+				registeredSession, e = a.registerCMSMember(r.Context(), s, url.Values{"user_name": {user}, "user_pwd": {pass}, "user_pwd2": {str(input["password2"])}, "verify": {str(input["verify"])}})
 			}
 			if e != nil {
 				return e
@@ -292,8 +308,10 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 				return nil
 			}
 		}
-		if _, e = a.memberCall(r.Context(), s, "api.php/user/login", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}}); e != nil {
-			return e
+		if !registeredSession {
+			if _, e = a.memberCall(r.Context(), s, "api.php/user/login", "POST", url.Values{"user_name": {user}, "user_pwd": {pass}}); e != nil {
+				return e
+			}
 		}
 		profile, e := a.profile(r.Context(), s)
 		if e != nil {

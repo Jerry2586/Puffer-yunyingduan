@@ -44,6 +44,32 @@ class Hetun extends Base {
   }
   return json(['code'=>1,'data'=>['is_login'=>$info!==null,'member_name'=>$info['member_name'] ?? '', 'expire_date'=>$info['expire_date'] ?? '', 'user_points'=>intval($info['user_points'] ?? 0),'groups'=>$groups]]);
  }
+ private function publicOrder($info) {
+  $out=[];
+  foreach (['order_id','order_code','order_price','order_status','order_status_text','order_time','order_pay_time','order_points','order_type','order_info'] as $key) {
+   if (array_key_exists($key,$info)) $out[$key]=$info[$key];
+  }
+  return $out;
+ }
+ public function member_orders() {
+  $member=$this->memberData();
+  if ($member===null) return json(['code'=>1401,'msg'=>'请先登录']);
+  $page=max(1,min(1000,intval(input('page',1))));
+  $result=model('Order')->listData(['o.user_id'=>intval($member['user_id'])],'o.order_id desc',$page,20);
+  if (intval($result['code'] ?? 0)!==1) return json(['code'=>1004,'msg'=>'无法读取订单']);
+  $list=[];
+  foreach (array_slice($result['list'] ?? [],0,20) as $order) $list[]=$this->publicOrder($order);
+  return json(['code'=>1,'info'=>['list'=>$list]]);
+ }
+ public function member_order() {
+  $member=$this->memberData();
+  if ($member===null) return json(['code'=>1401,'msg'=>'请先登录']);
+  $code=strval(input('order_code',''));
+  if (!preg_match('/^[A-Za-z0-9_-]{1,80}$/D',$code)) return json(['code'=>1004,'msg'=>'订单号无效']);
+  $result=model('Order')->infoData(['user_id'=>intval($member['user_id']),'order_code'=>$code]);
+  if (intval($result['code'] ?? 0)!==1) return json(['code'=>1004,'msg'=>'订单不存在']);
+  return json(['code'=>1,'info'=>$this->publicOrder($result['info'])]);
+ }
  public function play() {
   $param=['id'=>intval(input('id')), 'sid'=>max(1,intval(input('sid',1))), 'nid'=>max(1,intval(input('nid',1)))];
   // River client supplies canonical vod_id from the catalogue, independent of rewrite mode.

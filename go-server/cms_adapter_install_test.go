@@ -25,7 +25,7 @@ func previousPlaybackFixture(t *testing.T) []byte {
 }
 
 func TestPlaybackAdapterUpgradeAndRollback(t *testing.T) {
-	for _, release := range []string{"0.3.21", "0.3.22"} {
+	for _, release := range []string{"0.3.21", "0.3.22", "0.3.24"} {
 		for _, failPersistence := range []bool{false, true} {
 			t.Run(release+"/"+strconv.FormatBool(failPersistence), func(t *testing.T) {
 				h, root := managementLocalFixture(t)
@@ -40,13 +40,14 @@ func TestPlaybackAdapterUpgradeAndRollback(t *testing.T) {
 				}
 				playback := filepath.Join(root, "application", "index", "controller", "Hetun.php")
 				previous := previousPlaybackFixture(t)
-				if release == "0.3.22" {
-					previous, err = os.ReadFile("testdata/Hetun-v0.3.22.php")
+				if release != "0.3.21" {
+					previous, err = os.ReadFile("testdata/Hetun-v" + release + ".php")
 					if err != nil {
 						t.Fatal(err)
 					}
 					sum := sha256.Sum256(previous)
-					if hex.EncodeToString(sum[:]) != previousPlaybackAdapterV0322SHA256 {
+					expected := map[string]string{"0.3.22": previousPlaybackAdapterV0322SHA256, "0.3.24": previousPlaybackAdapterV0324SHA256}[release]
+					if hex.EncodeToString(sum[:]) != expected {
 						t.Fatal("previous release fixture digest changed")
 					}
 				}

@@ -31,6 +31,8 @@ var playbackAdapter []byte
 const previousPlaybackAdapterSHA256 = "625cab2e2c0efedd685abe936f91050f62570a84022fe845eb74fea19cc1a4bb"
 const previousPlaybackAdapterV0322SHA256 = "527f704513fc96920b783b5fb92f0b76a0f8cdb83de1deb1b74bb6759584f01c"
 
+const previousPlaybackAdapterV0324SHA256 = "a696a3cb8196c4ba4c878cc62ad00030599257a091981ef247ff4583bce6bb26"
+
 type managementConnection struct {
 	Base string `json:"base"`
 	Key  string `json:"key"`
@@ -579,7 +581,7 @@ func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) (
 			} else {
 				sum := sha256.Sum256(b)
 				digest := hex.EncodeToString(sum[:])
-				if t.rel != "application/index/controller/Hetun.php" || (digest != previousPlaybackAdapterSHA256 && digest != previousPlaybackAdapterV0322SHA256) {
+				if t.rel != "application/index/controller/Hetun.php" || (digest != previousPlaybackAdapterSHA256 && digest != previousPlaybackAdapterV0322SHA256 && digest != previousPlaybackAdapterV0324SHA256) {
 					return problem(409, "CMS 中已有不同适配器或密钥文件，请先手动检查")
 				}
 				t.previous, t.previousInfo = b, boundInfo

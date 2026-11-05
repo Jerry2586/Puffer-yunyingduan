@@ -25,6 +25,16 @@ namespace {
  function session($key,$value=null) { if (func_num_args()>1) $GLOBALS['sessions'][$key]=$value; return $GLOBALS['sessions'][$key] ?? null; }
  function model($name) {
   if ($name==='User') return new class { public function checkLogin() { $GLOBALS['member_checks']++; return $GLOBALS['member_result']; } };
+  if ($name==='Order') return new class {
+   public function listData($where,$order,$page,$limit) {
+    expect($where===['o.user_id'=>7] && $order==='o.order_id desc' && $page===1000 && $limit===20,'order list escaped its authenticated owner or pagination bounds');
+    return ['code'=>1,'list'=>array_fill(0,25,['order_id'=>3,'order_code'=>'A123','order_status'=>0,'user_id'=>7,'private'=>'secret'])];
+   }
+   public function infoData($where) {
+    expect($where===['user_id'=>7,'order_code'=>'A123'],'order lookup escaped authenticated ownership');
+    return $GLOBALS['order_result'];
+   }
+  };
   if ($name==='Group') return new class { public function getCache() { return $GLOBALS['groups']; } };
   if ($name!=='Vod') throw new \RuntimeException('unexpected model');
   return new class {
@@ -75,5 +85,20 @@ namespace {
  $result=$adapter->member_plans()['data'];
  expect($result['is_login']===true && $result['user_points']===123 && $result['expire_date']==='','member plans lost CMS identity or points');
  expect($member_checks===4,'every member lookup must revalidate CMS login');
- echo "playback and member adapter regression: 19 checks passed\n";
+ $params=['page'=>9999];
+ $orders=$adapter->member_orders();
+ expect($orders['code']===1 && count($orders['info']['list'])===20,'order list was not bounded');
+ expect(!isset($orders['info']['list'][0]['private']) && !isset($orders['info']['list'][0]['user_id']),'order list leaked private fields');
+ $params=['order_code'=>'A123'];
+ $order_result=['code'=>1,'info'=>['order_id'=>3,'order_code'=>'A123','order_status'=>0,'private'=>'secret']];
+ $result=$adapter->member_order();
+ expect($result['code']===1 && $result['info']['order_code']==='A123' && !isset($result['info']['private']),'order result leaked private fields');
+ $order_result=['code'=>1002,'msg'=>'database details'];
+ expect($adapter->member_order()===['code'=>1004,'msg'=>'订单不存在'],'order lookup exposed internal failure details');
+ $params=['order_code'=>"A123\n"];
+ expect($adapter->member_order()['code']===1004,'invalid order identity reached storage');
+ $member_result=['code'=>1001];
+ expect($adapter->member_orders()['code']===1401,'guest could list orders');
+ expect($adapter->member_order()['code']===1401,'guest could read an order');
+ echo "playback and member adapter regression: 26 checks passed\n";
 }
