@@ -1,11 +1,7 @@
 <?php
 namespace app\index\controller;
-use app\common\controller\All;
-class Hetun extends All {
- public function __construct() {
-  parent::__construct();
-  $this->label_user();
- }
+// Base owns playback permission checks in older MacCMS v10 releases.
+class Hetun extends Base {
  public function token() {
   if (empty($GLOBALS['user']['user_id'])) return json(['code'=>1401,'msg'=>'请先登录']);
   $token = session('csrf_token');

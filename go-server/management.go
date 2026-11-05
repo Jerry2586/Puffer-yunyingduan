@@ -27,6 +27,9 @@ var managementAdapter []byte
 //go:embed cms/Hetun.php
 var playbackAdapter []byte
 
+// Only the byte-exact playback adapter shipped in v0.3.21 may be upgraded.
+const previousPlaybackAdapterSHA256 = "625cab2e2c0efedd685abe936f91050f62570a84022fe845eb74fea19cc1a4bb"
+
 type managementConnection struct {
 	Base string `json:"base"`
 	Key  string `json:"key"`
@@ -498,7 +501,7 @@ func (a *app) managementAfterWrite(base, kind, action string, data, out M) {
 }
 
 // Installation is explicit and restricted to a validated local CMS root.
-func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) error {
+func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) (result error) {
 	if r.Method != "POST" {
 		return problem(405, "请求方法不支持")
 	}
@@ -533,11 +536,13 @@ func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) e
 		key = c.Key
 	}
 	type target struct {
-		rel    string
-		body   []byte
-		file   string
-		exists bool
-		info   os.FileInfo
+		rel          string
+		body         []byte
+		file         string
+		exists       bool
+		info         os.FileInfo
+		previous     []byte
+		previousInfo os.FileInfo
 	}
 	targets := []target{
 		{rel: "application/index/controller/Hetunops.php", body: managementAdapter},
@@ -558,30 +563,63 @@ func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) e
 			if !existing.Mode().IsRegular() {
 				return problem(409, "适配器位置不是普通文件")
 			}
-			b, be := os.ReadFile(t.file)
-			if be != nil || !bytes.Equal(b, t.body) {
-				return problem(409, "CMS 中已有不同适配器或密钥文件，请先手动检查")
+			f, be := os.Open(t.file)
+			if be != nil {
+				return problem(409, "无法读取 CMS 中的适配器或密钥文件，请先手动检查")
 			}
-			t.exists = true
+			b, be := io.ReadAll(io.LimitReader(f, 1<<20+1))
+			boundInfo, se := f.Stat()
+			ce := f.Close()
+			if be != nil || se != nil || ce != nil || len(b) > 1<<20 || !boundInfo.Mode().IsRegular() || !os.SameFile(existing, boundInfo) {
+				return problem(409, "无法读取 CMS 中的适配器或密钥文件，请先手动检查")
+			}
+			if bytes.Equal(b, t.body) {
+				t.exists = true
+			} else {
+				sum := sha256.Sum256(b)
+				if t.rel != "application/index/controller/Hetun.php" || hex.EncodeToString(sum[:]) != previousPlaybackAdapterSHA256 {
+					return problem(409, "CMS 中已有不同适配器或密钥文件，请先手动检查")
+				}
+				t.previous, t.previousInfo = b, boundInfo
+			}
 		} else if !os.IsNotExist(fe) {
 			return problem(500, "无法检查 CMS 适配器文件")
 		}
 	}
 	committed := false
 	defer func() {
-		if !committed {
-			for _, t := range targets {
-				if t.info != nil {
-					if current, err := os.Lstat(t.file); err == nil && os.SameFile(t.info, current) {
-						_ = os.Remove(t.file)
-					}
+		if committed {
+			return
+		}
+		for _, t := range targets {
+			if t.info == nil {
+				continue
+			}
+			var rollbackErr error
+			if t.previous != nil {
+				_, rollbackErr = replaceManagedAdapter(t.file, t.info, t.body, t.previous)
+			} else if current, err := os.Lstat(t.file); !os.IsNotExist(err) {
+				if err != nil || !os.SameFile(t.info, current) {
+					rollbackErr = problem(409, "适配器文件已被其他操作更改")
+				} else {
+					rollbackErr = os.Remove(t.file)
 				}
+			}
+			if rollbackErr != nil {
+				result = problem(500, "安装失败且适配器回滚未完成，请检查本地 CMS 文件")
 			}
 		}
 	}()
 	for i := range targets {
 		t := &targets[i]
 		if t.exists {
+			continue
+		}
+		if t.previous != nil {
+			t.info, e = replaceManagedAdapter(t.file, t.previousInfo, t.previous, t.body)
+			if e != nil {
+				return e
+			}
 			continue
 		}
 		f, fe := os.OpenFile(t.file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)

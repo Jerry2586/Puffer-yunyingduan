@@ -63,6 +63,7 @@ jobs:
         run: |
           php -l go-server/cms/Hetunops.php
           php -l go-server/cms/Hetun.php
+          php deploy/operations/playback-adapter.test.php
       - name: Install locked dependencies outside source
         run: |
           mkdir -p "$RUNNER_TEMP/hetun-ops-dependencies"
