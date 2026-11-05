@@ -168,7 +168,7 @@ func (a *app) manageCommunity(w http.ResponseWriter, r *http.Request, kind strin
 		ep := 0
 		if raw := q.Get("episode"); raw != "" {
 			var ok bool
-			ep, ok = managementInteger(raw, 1, 10000)
+			ep, ok = managementInteger(json.Number(raw), 1, 10000)
 			if !ok {
 				return problem(400, "集数无效")
 			}
@@ -369,7 +369,7 @@ func (a *app) communityRoute(w http.ResponseWriter, r *http.Request, v state) er
 			ep = 1
 			if raw := r.URL.Query().Get("episode"); raw != "" {
 				var ok bool
-				ep, ok = managementInteger(raw, 1, 10000)
+				ep, ok = managementInteger(json.Number(raw), 1, 10000)
 				if !ok {
 					return problem(400, "集数无效")
 				}

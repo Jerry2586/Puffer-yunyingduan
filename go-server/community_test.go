@@ -274,3 +274,42 @@ func TestCommunityPerMemberRateLimit(t *testing.T) {
 		t.Fatal("member submission limit bypassed")
 	}
 }
+
+func TestCommunityDanmuEpisodeQuery(t *testing.T) {
+	h, token := communityFixture(t)
+	record := communitySubmit(t, h, token, "danmu", M{"videoId": "1", "episode": 1, "position": 0, "content": "episode one"})
+	for _, route := range []string{"/api/community/danmu?videoId=1", "/api/community/danmu?videoId=1&mine=1", "/api/admin/manage/danmu?videoId=1"} {
+		w := h.req("GET", route+"&episode=1", nil, token)
+		if w.Code != 200 {
+			t.Fatalf("valid query rejected by %s: %d %s", route, w.Code, w.Body.String())
+		}
+		for _, raw := range []string{"0", "-1", "1.5", "1e0", "10001", "abc", "999999999999999999999999999999"} {
+			w = h.req("GET", route+"&episode="+raw, nil, token)
+			if w.Code != 400 {
+				t.Fatalf("invalid query %q accepted by %s: %d", raw, route, w.Code)
+			}
+		}
+	}
+	w := h.req("GET", "/api/admin/manage/danmu?episode=1", nil, "")
+	rows := arr(payload(t, w)["items"])
+	if len(rows) != 1 || number(obj(rows[0])["id"]) != number(record["id"]) {
+		t.Fatal("episode filter dropped its record")
+	}
+	w = h.req("GET", "/api/admin/manage/danmu?episode=2", nil, "")
+	if w.Code != 200 || len(arr(payload(t, w)["items"])) != 0 {
+		t.Fatal("episode filter leaked a different episode")
+	}
+	if w = h.req("GET", "/api/community/danmu?videoId=1&episode=2", nil, ""); w.Code != 400 {
+		t.Fatal("nonexistent episode accepted")
+	}
+}
+
+func TestCommunityDanmuJSONEpisodeRemainsStrict(t *testing.T) {
+	h, token := communityFixture(t)
+	for _, episode := range []any{"1", 1.5, 0, 10001} {
+		w := h.req("POST", "/api/community/danmu", M{"videoId": "1", "episode": episode, "position": 0, "content": "invalid"}, token)
+		if w.Code != 400 {
+			t.Fatalf("invalid JSON episode %#v accepted: %d", episode, w.Code)
+		}
+	}
+}
