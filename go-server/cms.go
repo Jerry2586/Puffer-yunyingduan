@@ -118,7 +118,7 @@ func cmsFetch(ctx context.Context, client *http.Client, u *url.URL, method strin
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return nil, problem(400, fmt.Sprintf("CMS 返回 HTTP %d", res.StatusCode))
+		return nil, coded(400, fmt.Sprintf("CMS 返回 HTTP %d", res.StatusCode), fmt.Sprintf("CMS_HTTP_%d", res.StatusCode))
 	}
 	if jar != nil {
 		jar.SetCookies(&target, res.Cookies())

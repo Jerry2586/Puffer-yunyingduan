@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -45,6 +46,20 @@ func (a *app) memberCall(ctx context.Context, s *memberSession, route, method st
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 	v, e := cmsFetch(ctx, a.cms, base, method, params, s.Jar)
+	// Fall back only when a known newer route is absent. Authentication failures,
+	// malformed responses and server failures must not trigger a second attempt.
+	var upstream *apiError
+	if errors.As(e, &upstream) && upstream.Code == "CMS_HTTP_404" {
+		legacy := map[string]string{
+			"api.php/user/get_info":          "index.php/hetun/member_info",
+			"api.php/user/ajax_upgrade_data": "index.php/hetun/member_plans",
+			"api.php/user/login":             "index.php/user/login",
+		}
+		if fallback := legacy[route]; fallback != "" {
+			base.Path = strings.TrimSuffix(base.Path, route) + fallback
+			v, e = cmsFetch(ctx, a.cms, base, method, params, s.Jar)
+		}
+	}
 	if e != nil {
 		return nil, e
 	}

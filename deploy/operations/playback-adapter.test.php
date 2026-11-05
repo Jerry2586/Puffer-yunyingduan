@@ -24,6 +24,8 @@ namespace {
  function json($value) { return $value; }
  function session($key,$value=null) { if (func_num_args()>1) $GLOBALS['sessions'][$key]=$value; return $GLOBALS['sessions'][$key] ?? null; }
  function model($name) {
+  if ($name==='User') return new class { public function checkLogin() { $GLOBALS['member_checks']++; return $GLOBALS['member_result']; } };
+  if ($name==='Group') return new class { public function getCache() { return $GLOBALS['groups']; } };
   if ($name!=='Vod') throw new \RuntimeException('unexpected model');
   return new class {
    public function infoData($where,$fields,$details) {
@@ -59,5 +61,19 @@ namespace {
  $result=$adapter->token();
  expect($result['code']===1 && preg_match('/^[a-f0-9]{32}$/',$result['info']['token']),'member token invalid');
  expect($adapter->token()['info']['token']===$result['info']['token'],'existing session token changed');
- echo "playback adapter regression: 11 checks passed\n";
+ $member_checks=0; $member_result=['code'=>1001,'msg'=>'not logged in'];
+ $groups=[['group_id'=>2,'group_status'=>1],['group_id'=>3,'group_status'=>0],['group_id'=>4,'group_status'=>1,'group_name'=>'<b>VIP</b>','group_points_month'=>100,'private'=>'secret']];
+ expect($adapter->member_info()['code']===1401,'global user bypassed CMS cookie validation');
+ $result=$adapter->member_plans()['data'];
+ expect($result['is_login']===false && $result['user_points']===0,'guest inherited member data');
+ expect(count($result['groups'])===1 && $result['groups'][0]['group_id']===4,'disabled or base group exposed');
+ expect($result['groups'][0]['group_name']==='VIP' && $result['groups'][0]['group_points_month']===100 && $result['groups'][0]['price_month']===0 && !isset($result['groups'][0]['private']),'plans leaked fields or invented money prices');
+ $member_result=['code'=>1,'info'=>['user_id'=>7,'user_name'=>'alice','group_id'=>4,'user_points'=>123,'user_end_time'=>0,'group'=>['group_id'=>2,'group_name'=>'普通会员'],'user_pwd'=>'secret','user_random'=>'secret','user_email'=>'private']];
+ $result=$adapter->member_info()['info'];
+ expect($result['user_id']===7 && $result['group_id']===2 && $result['member_name']==='普通会员','effective expired membership was not honored');
+ expect(!isset($result['user_pwd']) && !isset($result['user_random']) && !isset($result['user_email']),'profile leaked sensitive fields');
+ $result=$adapter->member_plans()['data'];
+ expect($result['is_login']===true && $result['user_points']===123 && $result['expire_date']==='','member plans lost CMS identity or points');
+ expect($member_checks===4,'every member lookup must revalidate CMS login');
+ echo "playback and member adapter regression: 19 checks passed\n";
 }
