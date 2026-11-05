@@ -24,6 +24,9 @@ import (
 //go:embed cms/Hetunops.php
 var managementAdapter []byte
 
+//go:embed cms/Hetun.php
+var playbackAdapter []byte
+
 type managementConnection struct {
 	Base string `json:"base"`
 	Key  string `json:"key"`
@@ -338,14 +341,18 @@ func (a *app) adminManagement(w http.ResponseWriter, r *http.Request) error {
 		}
 		jsonResponse(w, 200, out)
 		return nil
-	case "adapter":
+	case "adapter", "playback-adapter":
 		if r.Method != "GET" {
 			return problem(405, "请求方法不支持")
 		}
+		name, body := "Hetunops.php", managementAdapter
+		if route == "playback-adapter" {
+			name, body = "Hetun.php", playbackAdapter
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", "attachment; filename=Hetunops.php")
+		w.Header().Set("Content-Disposition", "attachment; filename="+name)
 		w.Header().Set("Cache-Control", "no-store")
-		_, e := w.Write(managementAdapter)
+		_, e := w.Write(body)
 		return e
 	case "install":
 		return a.installManagementAdapter(w, r)
@@ -532,8 +539,12 @@ func (a *app) installManagementAdapter(w http.ResponseWriter, r *http.Request) e
 		exists bool
 		info   os.FileInfo
 	}
-	targets := []target{{rel: "application/index/controller/Hetunops.php", body: managementAdapter}, {rel: "application/extra/hetun_operations.php", body: []byte("<?php\nreturn ['key' => '" + key + "'];\n")}}
-	// Preflight every target before creating either file.
+	targets := []target{
+		{rel: "application/index/controller/Hetunops.php", body: managementAdapter},
+		{rel: "application/extra/hetun_operations.php", body: []byte("<?php\nreturn ['key' => '" + key + "'];\n")},
+		{rel: "application/index/controller/Hetun.php", body: playbackAdapter},
+	}
+	// Preflight every target before creating any file.
 	for i := range targets {
 		t := &targets[i]
 		t.file = filepath.Join(root, filepath.FromSlash(t.rel))

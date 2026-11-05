@@ -76,7 +76,7 @@ func managementFixtureResponse(w http.ResponseWriter, input M) {
 }
 func TestManagementAdminBoundaryAndSignedGateway(t *testing.T) {
 	h, calls := managementFixture(t, managementFixtureResponse)
-	for _, route := range []string{"/api/admin/manage/connection", "/api/admin/manage/videos", "/api/admin/manage/adapter", "/api/admin/manage/moderation"} {
+	for _, route := range []string{"/api/admin/manage/connection", "/api/admin/manage/videos", "/api/admin/manage/adapter", "/api/admin/manage/playback-adapter", "/api/admin/manage/moderation"} {
 		req := httptest.NewRequest("GET", h.origin+route, nil)
 		w := httptest.NewRecorder()
 		h.a.ServeHTTP(w, req)
@@ -241,9 +241,12 @@ func TestManagementInstallerPreflightAndRollback(t *testing.T) {
 		t.Run(strconv.FormatBool(preserve), func(t *testing.T) {
 			h, root := managementLocalFixture(t)
 			first := filepath.Join(root, "application", "index", "controller", "Hetunops.php")
+			playback := filepath.Join(root, "application", "index", "controller", "Hetun.php")
 			if preserve {
-				if err := os.WriteFile(first, managementAdapter, 0600); err != nil {
-					t.Fatal(err)
+				for file, body := range map[string][]byte{first: managementAdapter, playback: playbackAdapter} {
+					if err := os.WriteFile(file, body, 0600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			h.a.store = &applyFailStore{h.a.store}
@@ -262,13 +265,21 @@ func TestManagementInstallerPreflightAndRollback(t *testing.T) {
 			} else if !os.IsNotExist(err) {
 				t.Fatal("uncommitted controller left behind")
 			}
+			playbackBody, playbackErr := os.ReadFile(playback)
+			if preserve {
+				if playbackErr != nil || string(playbackBody) != string(playbackAdapter) {
+					t.Fatal("rollback removed pre-existing playback adapter")
+				}
+			} else if !os.IsNotExist(playbackErr) {
+				t.Fatal("uncommitted playback adapter left behind")
+			}
 			if h.a.readState().ManagementConnection != nil {
 				t.Fatal("failed installation changed live state")
 			}
 		})
 	}
 	t.Run("idempotent-success", func(t *testing.T) {
-		h, _ := managementLocalFixture(t)
+		h, root := managementLocalFixture(t)
 		for i := 0; i < 2; i++ {
 			w := h.req("POST", "/api/admin/manage/install", M{"source": managementBase(h.a.readState().CMSBase)}, "")
 			if w.Code != 200 {
@@ -278,5 +289,76 @@ func TestManagementInstallerPreflightAndRollback(t *testing.T) {
 		if h.a.readState().ManagementConnection == nil {
 			t.Fatal("installed connection missing")
 		}
+		for name, expected := range map[string][]byte{"Hetunops.php": managementAdapter, "Hetun.php": playbackAdapter} {
+			body, err := os.ReadFile(filepath.Join(root, "application", "index", "controller", name))
+			if err != nil || string(body) != string(expected) {
+				t.Fatalf("installed controller %s missing or wrong", name)
+			}
+		}
 	})
+}
+
+func TestManagementInstallerPreservesConflictingPlaybackAdapter(t *testing.T) {
+	for _, directory := range []bool{false, true} {
+		t.Run(strconv.FormatBool(directory), func(t *testing.T) {
+			h, root := managementLocalFixture(t)
+			playback := filepath.Join(root, "application", "index", "controller", "Hetun.php")
+			if directory {
+				if err := os.Mkdir(playback, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(playback, []byte("custom-playback-adapter"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			w := h.req("POST", "/api/admin/manage/install", M{"source": managementBase(h.a.readState().CMSBase)}, "")
+			if w.Code != 409 {
+				t.Fatalf("playback conflict status %d", w.Code)
+			}
+			for _, rel := range []string{"application/index/controller/Hetunops.php", "application/extra/hetun_operations.php"} {
+				if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+					t.Fatal("preflight created another target before rejecting playback conflict")
+				}
+			}
+			if directory {
+				info, err := os.Stat(playback)
+				if err != nil || !info.IsDir() {
+					t.Fatal("existing directory changed")
+				}
+			} else {
+				b, err := os.ReadFile(playback)
+				if err != nil || string(b) != "custom-playback-adapter" {
+					t.Fatal("existing playback adapter overwritten")
+				}
+			}
+			if h.a.readState().ManagementConnection != nil {
+				t.Fatal("conflicting installation persisted connection")
+			}
+		})
+	}
+}
+
+func TestManagementAdapterDownloads(t *testing.T) {
+	h, calls := managementFixture(t, managementFixtureResponse)
+	for _, item := range []struct {
+		route, name string
+		body        []byte
+	}{
+		{"adapter", "Hetunops.php", managementAdapter},
+		{"playback-adapter", "Hetun.php", playbackAdapter},
+	} {
+		w := h.req("GET", "/api/admin/manage/"+item.route, nil, "")
+		if w.Code != 200 || w.Body.String() != string(item.body) || len(item.body) == 0 {
+			t.Fatalf("adapter download %s invalid", item.route)
+		}
+		if w.Header().Get("Content-Disposition") != "attachment; filename="+item.name || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("adapter download metadata invalid")
+		}
+		w = h.req("POST", "/api/admin/manage/"+item.route, M{}, "")
+		if w.Code != 405 {
+			t.Fatal("adapter download accepted mutation method")
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("adapter download made CMS request")
+	}
 }

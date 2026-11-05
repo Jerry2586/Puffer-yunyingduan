@@ -6,3 +6,4 @@ import './carousel-appearance.test.mjs';
 import './category-binding.test.mjs';
 import './layout-controls.test.mjs';
 import './shared-settings.test.mjs';
+import './cms-adapters.test.mjs';

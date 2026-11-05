@@ -119,14 +119,14 @@ async function configure(mode:'key'|'install'|'test'){
   if(mode==='key'){if(!/^[a-fA-F0-9]{64}$/.test(key.value.trim()))throw new Error('请输入 64 位十六进制管理密钥。');await managementApi.connect(expected,key.value.trim());key.value='';}
   else if(mode==='install')await managementApi.install(expected);
   else{const result=await managementApi.test();if(result.source!==expected)throw new Error('内容源已更改，请刷新。');}
-  if(alive)notice.value=mode==='test'?'管理适配器连接正常。':'管理适配器已配置。';
+  if(alive)notice.value=mode==='test'?'管理适配器连接正常。':mode==='install'?'管理与播放适配器文件已安装，正在核对管理连接。':'管理适配器已配置。';
  }catch(e){if(alive)error.value=describe(e);return;}
  finally{if(alive)mutating.value=false;}
  if(alive)await refresh();
 }
-function downloadAdapter(){
+function downloadAdapter(kind:'management'|'playback'){
  // #ifdef H5
- window.open(getServiceBase()+'/api/admin/manage/adapter','_blank','noopener');
+ window.open(getServiceBase()+'/api/admin/manage/'+(kind==='playback'?'playback-adapter':'adapter'),'_blank','noopener');
  // #endif
 }
 const tableStyle=computed(()=>({gridTemplateColumns:props.kind==='videos'?'44px 76px minmax(240px,2fr) 86px 82px 130px 80px 100px 100px':props.kind==='users'?'44px 76px minmax(170px,1fr) 130px 88px 90px 166px 160px 130px':moderated.value?'44px 70px 150px 96px minmax(260px,2fr) 170px 144px':replyKind.value?'44px 70px 155px minmax(240px,1fr) minmax(200px,1fr) 166px 130px':'44px 70px 155px minmax(250px,1fr) 166px 90px 100px'}));
@@ -140,7 +140,7 @@ onUnmounted(()=>{alive=false;loadSequence++;key.value='';form.value={};});
   <view v-if="notice" class="alert success" role="status">{{notice}}</view>
   <view v-if="cmsKind" class="connection-panel">
    <button class="connection-toggle" :aria-expanded="connectionOpen" @click="connectionOpen=!connectionOpen"><text class="connection-dot" :class="{ready:loaded}"/><text>{{loaded?'苹果 CMS 管理已连接':connection?.configured?'管理适配器已配置':'苹果 CMS 管理连接'}}</text><text class="connection-source">{{connection?.base||'尚未设置内容源'}}</text><text>{{connectionOpen?'收起':'配置连接'}} {{connectionOpen?'⌃':'⌄'}}</text></button>
-   <view v-if="connectionOpen" class="connection-body"><text>将管理适配器安装到苹果 CMS，再填写与密钥文件一致的管理密钥。</text><text class="path-hint">控制器：application/index/controller/Hetunops.php · 密钥：application/extra/hetun_operations.php</text><view class="connection-controls"><button class="btn" @click="downloadAdapter">下载适配器</button><button v-if="connection?.localAvailable" class="btn" :disabled="busy" @click="configure('install')">安装到本地 CMS</button><input v-model="key" class="key-input" password placeholder="64 位管理密钥" maxlength="64" :disabled="busy" autocomplete="off"/><button class="btn blue" :disabled="busy||!key.trim()||!connection?.base" @click="configure('key')">保存密钥</button><button class="btn" :disabled="busy||!connection?.configured" @click="configure('test')">测试连接</button></view></view>
+   <view v-if="connectionOpen" class="connection-body"><text>同机安装会补齐管理、播放权限与会员令牌适配器，并配置管理密钥；已有不同文件时停止安装，请先核对。</text><text class="path-hint">控制器目录：application/index/controller/（Hetunops.php、Hetun.php）· 密钥：application/extra/hetun_operations.php。手动安装需下载两个适配器并填写一致的管理密钥。</text><view class="connection-controls"><button class="btn" @click="downloadAdapter('management')">下载管理适配器</button><button class="btn" @click="downloadAdapter('playback')">下载播放适配器</button><button v-if="connection?.localAvailable" class="btn" :disabled="busy" @click="configure('install')">安装到本地 CMS</button><input v-model="key" class="key-input" password placeholder="64 位管理密钥" maxlength="64" :disabled="busy" autocomplete="off"/><button class="btn blue" :disabled="busy||!key.trim()||!connection?.base" @click="configure('key')">保存密钥</button><button class="btn" :disabled="busy||!connection?.configured" @click="configure('test')">测试连接</button></view></view>
   </view>
   <view class="filter-card">
    <view class="filter-line">
