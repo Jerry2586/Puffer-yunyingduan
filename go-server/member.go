@@ -216,7 +216,7 @@ func (a *app) memberRoute(w http.ResponseWriter, r *http.Request, v state) error
 			return problem(502, "直连播放失败，请切换其他线路")
 		}
 		if mode != "direct" {
-			resolved, e = a.resolvePlayback(r.Context(), settings.Published, u.String(), p, excluded)
+			resolved, e = a.resolvePlayback(r.Context(), playbackConfigForSource(v, code), u.String(), p, excluded)
 			if e != nil {
 				return e
 			}

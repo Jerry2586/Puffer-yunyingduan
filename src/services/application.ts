@@ -15,7 +15,7 @@ export const applicationApi={
  history:async()=>{const current=captureMemberContext();const result=await clientRequest<{items:HistoryEntry[]}>('member/history');current();return result;},
  remember:async(videoId:string,episode:number,position:number)=>{const current=captureMemberContext();const result=await clientRequest<{ok:boolean;entry:HistoryEntry}>('member/history','POST',{videoId,episode,position});current();return result;},
 };
-export interface PlaybackSource {code:string;name:string;enabled:boolean;trialSeconds:number;mode:'auto'|'direct'}
+export interface PlaybackSource {code:string;name:string;enabled:boolean;trialSeconds:number;mode:'auto'|'direct'|'resolve';resolverIds?:string[]}
 export interface DanmuSettings {enabled:boolean;thirdParty:boolean;endpoint:string;match:'id'|'title';preferredDomain:string;tvDensity:number}
 export interface PlaybackPreferences {version:number;updatedAt:string;source:string;sources:PlaybackSource[];danmu:DanmuSettings}
 export const playbackCenterApi={

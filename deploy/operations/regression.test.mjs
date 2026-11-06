@@ -7,3 +7,4 @@ import './category-binding.test.mjs';
 import './layout-controls.test.mjs';
 import './shared-settings.test.mjs';
 import './cms-adapters.test.mjs';
+import './installation-time.test.mjs';

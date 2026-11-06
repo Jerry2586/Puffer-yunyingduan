@@ -112,20 +112,22 @@ function studioLogout({page='application',leave=async()=>true,flush=async()=>{}}
  const ast=ts.createSourceFile('studio.ts',source,ts.ScriptTarget.Latest,true);
  const declaration=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='logout');assert.ok(declaration);
  const busy=vue.ref(false),authenticated=vue.ref(true),userCenterOpen=vue.ref(true),error=vue.ref(''),calls=[];
- const scope={busy,authenticated,userCenterOpen,error,operationsCenter:true,announcementPage:vue.ref(page==='announcement'),resolverPage:vue.ref(page==='playback'),applicationPage:vue.ref(page==='application'),announcementEditor:vue.ref({prepareToLeave:leave}),playbackEditor:vue.ref({prepareToLeave:leave}),applicationEditor:vue.ref({prepareToLeave:leave}),autosave:{flush},api:{logout:async()=>calls.push('logout')},cache:{clear:()=>calls.push('clear')}};
+ const scope={busy,authenticated,userCenterOpen,error,operationsCenter:true,schedulePage:vue.ref(page==='schedule'),scheduleEditor:vue.ref({prepareToLeave:leave}),announcementPage:vue.ref(page==='announcement'),resolverPage:vue.ref(page==='playback'),applicationPage:vue.ref(page==='application'),announcementEditor:vue.ref({prepareToLeave:leave}),playbackEditor:vue.ref({prepareToLeave:leave}),applicationEditor:vue.ref({prepareToLeave:leave}),autosave:{flush},api:{logout:async()=>calls.push('logout')},cache:{clear:()=>calls.push('clear')}};
  const output=ts.transpileModule(declaration.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2020}}).outputText;
  const logout=new Function(...Object.keys(scope),output+';return logout;')(...Object.values(scope));
  return {logout,busy,authenticated,userCenterOpen,error,calls};
 }
 test('studio logout waits for shared settings to save before ending the session',async()=>{
- const saved=deferred();let requested=0;const h=studioLogout({leave:async()=>{requested++;return saved.promise;}});
+ for(const page of ['application','schedule']){
+ const saved=deferred();let requested=0;const h=studioLogout({page,leave:async()=>{requested++;return saved.promise;}});
  const pending=h.logout();assert.equal(requested,1);assert.equal(h.busy.value,true);assert.deepEqual(h.calls,[]);assert.equal(h.authenticated.value,true);
  await h.logout();assert.equal(requested,1);saved.resolve(true);await pending;
  assert.deepEqual(h.calls,['logout','clear']);assert.equal(h.authenticated.value,false);assert.equal(h.userCenterOpen.value,false);assert.equal(h.busy.value,false);
+ }
 });
 test('studio logout preserves the session when an editor cancels leaving',async()=>{
- for(const page of ['application','playback','announcement']){
-  const h=studioLogout({page,leave:async()=>false});await h.logout();assert.deepEqual(h.calls,[]);assert.equal(h.authenticated.value,true);assert.equal(h.userCenterOpen.value,true);assert.equal(h.busy.value,false);
+ for(const page of ['application','playback','announcement','schedule']){
+  const h=studioLogout({page,leave:async()=>false});await h.logout();assert.deepEqual(h.calls,[]);assert.equal(h.authenticated.value,true);assert.equal(h.userCenterOpen.value,true);assert.equal(h.busy.value,false);assert.equal(h.error.value,'');
  }
 });
 test('studio logout retains authentication when flushing existing client settings fails',async()=>{

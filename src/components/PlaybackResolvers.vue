@@ -4,7 +4,7 @@ import EditorChoice from './EditorChoice.vue';
 import {playbackResolverApi} from '@/services/api';
 import type {PlaybackResolverConfig,PlaybackResolverSettings,PlaybackResolverResult,PlaybackResolverSource} from '@/services/api';
 import type {Platform} from '@/domain/types';
-const emit=defineEmits<{(e:'dirty',value:boolean):void}>();
+const emit=defineEmits<{(e:'dirty',value:boolean):void;(e:'published',value:PlaybackResolverConfig):void}>();
 const settings=ref<PlaybackResolverSettings|null>(null),draft=ref<PlaybackResolverConfig>({enabled:false,directFirst:true,timeoutSeconds:5,totalSeconds:15,maxAttempts:3,sources:[]});
 const loading=ref(false),busy=ref(false),testing=ref(false),error=ref(''),message=ref(''),testURL=ref(''),testPlatform=ref<Platform>('mobile'),result=ref<PlaybackResolverResult|null>(null);
 const switchValue=(event:Event)=>!!(event as Event & {detail:{value:boolean}}).detail.value;
@@ -14,7 +14,7 @@ const dirty=computed(()=>!!settings.value&&JSON.stringify(draft.value)!==JSON.st
 const unpublished=computed(()=>!!settings.value&&JSON.stringify(draft.value)!==JSON.stringify(settings.value.published));
 const disabled=computed(()=>busy.value||testing.value||loading.value);
 watch(dirty,value=>emit('dirty',value),{immediate:true});watch(draft,()=>{result.value=null;},{deep:true});
-function receive(v:PlaybackResolverSettings){settings.value=v;draft.value=clone(v.draft);}
+function receive(v:PlaybackResolverSettings){settings.value=v;draft.value=clone(v.draft);emit('published',clone(v.published));}
 async function load(){loading.value=true;error.value='';try{receive(await playbackResolverApi.get());}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
 async function save(){if(!settings.value||!validateHeaders())return;busy.value=true;error.value='';try{receive(await playbackResolverApi.save(settings.value.revision,draft.value));message.value='草稿已保存，发布后四端播放请求才会使用新配置。';}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
 async function publish(){if(!settings.value||!validateHeaders())return;busy.value=true;error.value='';try{if(dirty.value)receive(await playbackResolverApi.save(settings.value.revision,draft.value));receive(await playbackResolverApi.publish(settings.value.revision));message.value='已发布至四端统一播放接口。';}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}

@@ -204,6 +204,9 @@ func (a *app) adminPlayback(w http.ResponseWriter, r *http.Request) error {
 			if e := validatePlayback(current.Draft); e != nil {
 				return e
 			}
+			if e := validatePlaybackBindings(playbackPreferencesFor(*v), current.Draft); e != nil {
+				return e
+			}
 			current.Published = clone(current.Draft)
 			current.PublishedVersion++
 			current.PublishedAt = now()
@@ -259,6 +262,10 @@ func (a *app) resolvePlayback(ctx context.Context, c playbackConfig, raw, p stri
 		return result, e
 	}
 	if !c.Enabled {
+		if has(excluded, "direct") {
+			result.Message = "直连播放失败，当前未配置可用解析器"
+			return result, nil
+		}
 		result.OK = true
 		result.URL = source.String()
 		result.SourceID = "direct"

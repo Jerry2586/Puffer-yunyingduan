@@ -15,11 +15,12 @@ import (
 )
 
 type cmsPlaybackSource struct {
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	Enabled      bool   `json:"enabled"`
-	TrialSeconds int    `json:"trialSeconds"`
-	Mode         string `json:"mode"`
+	Code         string   `json:"code"`
+	Name         string   `json:"name"`
+	Enabled      bool     `json:"enabled"`
+	TrialSeconds int      `json:"trialSeconds"`
+	Mode         string   `json:"mode"`
+	ResolverIDs  []string `json:"resolverIds,omitempty"`
 }
 type danmuPreferences struct {
 	Enabled         bool   `json:"enabled"`
@@ -54,10 +55,23 @@ func validatePlaybackPreferences(c playbackPreferences) error {
 	}
 	seen := map[string]bool{}
 	for _, s := range c.Sources {
-		if !resolverID.MatchString(s.Code) || seen[s.Code] || strings.TrimSpace(s.Name) == "" || utf8.RuneCountInString(s.Name) > 60 || s.TrialSeconds < 0 || s.TrialSeconds > 3600 || !has([]string{"auto", "direct"}, s.Mode) {
+		if !resolverID.MatchString(s.Code) || seen[s.Code] || strings.TrimSpace(s.Name) == "" || utf8.RuneCountInString(s.Name) > 60 || s.TrialSeconds < 0 || s.TrialSeconds > 3600 || !has([]string{"auto", "direct", "resolve"}, s.Mode) {
 			return problem(400, "播放源标识、名称、模式或试看秒数无效")
 		}
 		seen[s.Code] = true
+		if len(s.ResolverIDs) > 32 {
+			return problem(400, "每条播放源最多绑定32个解析器")
+		}
+		ids := map[string]bool{}
+		for _, id := range s.ResolverIDs {
+			if !resolverID.MatchString(id) || id == "direct" || ids[id] {
+				return problem(400, "解析器绑定标识无效或重复")
+			}
+			ids[id] = true
+		}
+		if s.Mode == "resolve" && len(s.ResolverIDs) == 0 {
+			return problem(400, "指定解析模式至少绑定一个解析器")
+		}
 	}
 	d := c.Danmu
 	if !has([]string{"id", "title"}, d.Match) || d.TVDensity < 1 || d.TVDensity > 100 {
@@ -94,11 +108,7 @@ func (a *app) adminPlaybackCenter(w http.ResponseWriter, r *http.Request) error 
 		if r.Method != "GET" {
 			return problem(405, "请求方法不支持")
 		}
-		connection, e := a.managementConnectionFor(v)
-		if e != nil {
-			return e
-		}
-		out, e := a.managementCall(r.Context(), connection, "playback.sources", M{})
+		out, e := a.discoverPlaybackSources(r.Context(), v)
 		if e != nil {
 			return e
 		}
@@ -170,6 +180,9 @@ func (a *app) adminPlaybackCenter(w http.ResponseWriter, r *http.Request) error 
 		}
 		if playbackPreferencesFor(*s).Version != c.Version {
 			return coded(409, "播放设置已变更，请读取最新版后重试", "PLAYBACK_SETTINGS_CHANGED")
+		}
+		if e := validatePlaybackBindings(c, playbackState(*s).Published); e != nil {
+			return e
 		}
 		c.Version++
 		c.UpdatedAt = now()
